@@ -101,3 +101,25 @@ uv run python tmp/sample.py   # tmpディレクトリのサンプルコード実
   - `provence-implementation-spec.md`: Provence実装の詳細設計
   - `data-format-spec.md`: データフォーマット仕様
 - **更新ルール**: 実装やスペック変更時は必ず`git add`と`git commit`を実行
+
+### 実装の差分確認
+
+text-prunerブランチとmasterブランチの差分を確認することで、Provence実装の全体像を把握できます：
+
+```bash
+# 変更されたファイルのリスト
+git diff --name-only master...text-pruner
+
+# 詳細な差分
+git diff master...text-pruner
+
+# 新規追加ファイルのみ
+git diff --name-only --diff-filter=A master...text-pruner
+```
+
+この差分を追跡することで：
+- OSS本体の実装パターン
+- 今回の拡張による変更点
+- 新規追加されたProvence関連機能
+
+を理解できます。

@@ -40,6 +40,12 @@ dependencies = [
     "huggingface-hub>=0.20.0",
     "Pillow",
     "typing_extensions>=4.5.0",
+    "datasets>=3.6.0",
+    "sentencepiece>=0.2.0",
+    "einops>=0.8.1",
+    "protobuf>=6.31.1",
+    "bunkai>=1.5.7",
+    "langdetect>=1.0.9",
 ]
 
 [project.urls]
