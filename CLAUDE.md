@@ -42,7 +42,7 @@ uv run python tmp/sample.py   # tmpディレクトリのサンプルコード実
 4. **evaluation/**: 各種評価メトリクス
 5. **cross_encoder/**: リランカー実装（Provenceアプローチとの統合予定）
 
-### Provenceアプローチの実装方針
+### Provenceアプローチの実装状況
 
 `@docs-text-pruner/provence/provence_paper.md`に基づく実装：
 
@@ -51,12 +51,16 @@ uv run python tmp/sample.py   # tmpディレクトリのサンプルコード実
    - トークン/文レベルのバイナリ分類として定式化
    - Rerankerとの統合学習が可能
    - 動的なpruning比率の決定（0-100%）
-   - DeBERTa-v3ベースで高効率
+   - hotchpotch/japanese-reranker-xsmall-v2ベースで実装
 
-3. **実装場所**:
-   - `sentence_transformers/text_pruner/`に新規モジュール作成
-   - 既存のcross_encoderインフラを活用
-   - 新しい損失関数の追加が必要
+3. **実装済みコンポーネント**:
+   - `sentence_transformers/provence/` - Provence実装
+     - `encoder.py` - ProvenceEncoderクラス（メインクラス）
+     - `losses.py` - ProvenceLoss（統合損失関数）
+     - `losses_batched.py` - バッチ対応損失（Hard Negative学習）
+     - `trainer.py` - ProvenceTrainer
+   - `scripts/` - 学習・評価スクリプト群
+   - 100kデータセットでの学習済み（平均29.3%圧縮@閾値0.1）
 
 ### 参考ドキュメント
 
@@ -77,6 +81,7 @@ uv run python tmp/sample.py   # tmpディレクトリのサンプルコード実
 - **テスト**: 新機能には必ずテストを追加
 - **ドキュメント**: docstringはGoogle/NumPyスタイル
 - **命名規則**: 既存コードのパターンに従う
+- **実装時の重要事項**: 新しい機能を実装する際は、必ずSentence Transformers内の類似実装を探して参考にする。特にhard negative学習、multiple texts処理、batch処理の最適化については既存の実装パターンを活用すること。
 
 ### 開発時の注意事項
 
@@ -87,11 +92,18 @@ uv run python tmp/sample.py   # tmpディレクトリのサンプルコード実
 
 ### text-prunerブランチの作業内容
 
-1. Provenceペーパーの実装
-2. Query-dependent text prunerの開発
-3. Rerankerとの統合機能
-4. 評価メトリクスの実装
-5. サンプルコードとドキュメントの作成
+1. Provenceペーパーの実装 ✅
+2. Query-dependent text prunerの開発 ✅
+3. Rerankerとの統合機能 ✅
+4. 評価メトリクスの実装 ✅
+5. サンプルコードとドキュメントの作成 ✅
+
+#### 実装済み機能
+- ProvenceEncoder: デュアルヘッド（ランキング＋プルーニング）アーキテクチャ
+- バッチ学習: Hard Negative学習による効率的な学習
+- 多言語対応: 日本語・英語の文分割機能
+- 教師蒸留: 既存リランカーからの知識蒸留
+- 動的プルーニング: クエリに応じた適応的な圧縮
 
 ### 仕様書管理
 
