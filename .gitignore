@@ -28,6 +28,14 @@ MANIFEST
 
 # Coverage
 htmlcov
+
+# Training outputs and temporary files
+outputs/
+tmp/
+*.bin
+*.safetensors
+*.pt
+*.pth
 .coverage*
 coverage.xml
 
@@ -67,3 +75,6 @@ tmp
 .DS_Store
 /runs
 /tmp_trainer/
+/outputs/
+/output/
+

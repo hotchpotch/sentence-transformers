@@ -1,8 +1,0 @@
-{
-  "classifier_dropout": 0.1,
-  "hidden_size": 128,
-  "model_type": "provence_pruning",
-  "sentence_pooling": "mean",
-  "transformers_version": "4.52.4",
-  "use_weighted_pooling": false
-}
