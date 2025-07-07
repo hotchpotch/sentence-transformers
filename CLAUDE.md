@@ -44,7 +44,7 @@ uv run python tmp/sample.py   # tmpディレクトリのサンプルコード実
 
 ### Provenceアプローチの実装方針
 
-`@docs-text-pruner/provence_paper.md`に基づく実装：
+`@docs-text-pruner/provence/provence_paper.md`に基づく実装：
 
 1. **目的**: RAGパイプラインでquery依存のcontext pruningを実現
 2. **特徴**:
@@ -57,6 +57,19 @@ uv run python tmp/sample.py   # tmpディレクトリのサンプルコード実
    - `sentence_transformers/text_pruner/`に新規モジュール作成
    - 既存のcross_encoderインフラを活用
    - 新しい損失関数の追加が必要
+
+### 参考ドキュメント
+
+`@docs-text-pruner/`以下に関連ドキュメントが整理されています。実装時は適宜参照してください：
+
+- **provence/**: Provence論文関連
+  - `provence_paper.md`: Provence論文の詳細解説
+  - `provence_blog.md`: Provence実装のブログ記事
+- **sentence_transformer_blogs/**: Sentence Transformersの関連技術
+  - `train-reranker.md`: Rerankerの学習方法
+  - `train-sparse-encoder.md`: Sparse Encoderの学習方法
+  - `static-embeddings.md`: Static Embeddingsの解説
+- **specs/**: 実装仕様書（前述の通り）
 
 ### コーディング規約
 
