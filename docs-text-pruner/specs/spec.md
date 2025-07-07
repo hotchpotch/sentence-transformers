@@ -54,6 +54,11 @@ sentence_transformers/
 }
 ```
 
+### 利用可能なデータセット
+- **hotchpotch/wip-query-context-pruner**: 日本語Wikipedia QAベース（約130万サンプル）
+  - 現在は開発中フォーマット、変換が必要
+  - 詳細は[text-pruner-dataset.md](./text-pruner-dataset.md)参照
+
 ### 推論データ  
 ```json
 {
