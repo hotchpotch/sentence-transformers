@@ -30,6 +30,7 @@ MANIFEST
 htmlcov
 
 # Training outputs and temporary files
+output/
 outputs/
 tmp/
 *.bin
