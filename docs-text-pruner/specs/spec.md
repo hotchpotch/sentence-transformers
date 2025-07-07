@@ -693,52 +693,77 @@ def test_inference_performance():
     assert provence_time < ranking_time * 1.5
 ```
 
-## 実装ステップ
+## 実装ステップ（詳細版）
 
-### Phase 1: 基礎実装（1-2週間）
+### Phase 1: 基礎実装（Week 1）
 
-1. **ProvenceCrossEncoder基本クラス**
-   - CrossEncoderを継承
-   - Pruning headの追加
-   - 基本的なforward pass
+1. **CrossEncoderクラスの拡張**
+   ```python
+   # enable_pruning パラメータ追加
+   # AutoModelForTokenClassification互換のpruning head
+   # save/load メソッドの拡張
+   ```
 
-2. **データ構造の定義**
-   - ProvenceOutput dataclass
-   - 拡張データフォーマット
+2. **データ構造とモジュール設計**
+   - ProvenceOutput dataclass（ranking + pruning出力）
+   - ProvencePruningHead（PreTrainedModel継承）
+   - AutoModelへの登録
 
 3. **基本的な推論機能**
-   - predict_with_pruning
-   - prune メソッド
+   - predict_with_pruning（バッチ処理対応）
+   - prune メソッド（単一文書処理）
+   - 文境界の効率的な計算
 
-### Phase 2: 学習機能（1-2週間）
+### Phase 2: 学習機能（Week 2）
 
 1. **損失関数実装**
-   - ProvenceLoss（統合損失）
-   - PruningBCELoss（バイナリ）
-   - PruningMSELoss（スコアベース）
+   - ProvenceLoss（統合損失、教師スコア対応）
+   - 文レベル/トークンレベルの切り替え
+   - Gradient accumulation対応
 
-2. **データローダー拡張**
+2. **データコレーター拡張**
    - ProvenceCrossEncoderDataCollator
-   - 文分割とラベル処理
+   - 動的文分割とキャッシング
+   - offset_mappingを使用した境界計算
 
-3. **MultilingualChunker**
-   - 言語別の文分割実装
-   - 位置情報の保持
+3. **MultilingualChunker完成**
+   - 日本語（BudouX）、英語（NLTK）対応
+   - フォールバック処理
+   - 位置情報の正確な保持
 
-### Phase 3: 評価・最適化（1週間）
+### Phase 3: 推論最適化とAutoModel統合（Week 3）
 
-1. **評価メトリクス**
-   - ProvenceEvaluator実装
-   - 統合評価指標
+1. **AutoModelForTokenClassification互換性**
+   - ProvencePruningConfig/ProvencePruningHead
+   - 単独使用可能な設計
+   - HuggingFace Hubへのアップロード対応
 
-2. **最適化**
-   - バッチ処理の高速化
-   - メモリ使用量の削減
+2. **推論の最適化**
+   - バッチ推論の並列化
+   - Mixed precision推論
+   - 動的バッチサイズ調整
 
-3. **ドキュメント・テスト**
-   - APIドキュメント
-   - 使用例の作成
-   - 包括的なテスト
+3. **エラーハンドリング強化**
+   - RobustMultilingualChunker
+   - 空文書・長文書対応
+   - メモリ不足時のフォールバック
+
+### Phase 4: 評価とベンチマーク（Week 4）
+
+1. **ProvenceEvaluator実装**
+   - Reranking評価（MAP, MRR, NDCG）
+   - Pruning評価（Precision, Recall, F1）
+   - 統合評価（QA精度、圧縮率）
+
+2. **ベンチマークスクリプト**
+   - 速度比較（vs 標準CrossEncoder）
+   - メモリ使用量測定
+   - 多言語性能評価
+
+3. **ドキュメント・サンプル**
+   - APIリファレンス生成
+   - Jupyterノートブック作成
+   - 学習済みモデルの公開準備
 
 ### Phase 4: PR準備（3-5日）
 
@@ -827,6 +852,43 @@ def test_inference_performance():
 - [実装詳細仕様](./provence-implementation-spec.md)
 - [データフォーマット仕様](./data-format-spec.md)
 - [データセット仕様](./text-pruner-dataset.md)
+- [詳細実装計画](./detailed-implementation-plan.md) - AutoModelForTokenClassification統合を含む実装手順
+
+## 技術的な特徴
+
+### AutoModelForTokenClassification互換性
+
+```python
+# 単独でToken Classificationモデルとして使用可能
+from transformers import AutoModelForTokenClassification
+
+model = AutoModelForTokenClassification.from_pretrained(
+    "your-org/provence-pruner-deberta-v3"
+)
+
+# または、CrossEncoderの一部として
+model = CrossEncoder(
+    "microsoft/deberta-v3-base",
+    enable_pruning=True  # 内部でtoken classification headを追加
+)
+```
+
+### モジュラー設計の利点
+
+1. **柔軟な使用方法**
+   - Reranking only（従来のCrossEncoder）
+   - Pruning only（Token Classifier）
+   - Joint（Reranking + Pruning）
+
+2. **既存エコシステムとの統合**
+   - HuggingFace Transformersとの完全互換
+   - Sentence Transformersのパターンに準拠
+   - AutoModelレジストリへの登録
+
+3. **拡張性**
+   - カスタムチャンカーの追加が容易
+   - 新しい言語サポートの追加
+   - 異なるプーリング戦略の実装
 
 ## 次のステップ
 
