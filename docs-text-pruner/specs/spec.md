@@ -46,51 +46,99 @@ Sentence TransformersにProvence論文ベースのtext-pruner機能を実装す�
 sentence_transformers/
 ├── cross_encoder/
 │   ├── __init__.py             # ProvenceCrossEncoderをエクスポート
-│   ├── ProvenceCrossEncoder.py # メインクラス
-│   ├── data_collator.py        # 既存を拡張
+│   ├── CrossEncoder.py         # 既存クラスにProvence機能統合
+│   ├── data_collator.py        # ProvenceDataCollator追加
 │   ├── losses/
+│   │   ├── __init__.py         # 新規損失関数をエクスポート
 │   │   ├── ProvenceLoss.py     # 統合損失関数
 │   │   ├── PruningBCELoss.py   # Pruning専用損失
 │   │   └── PruningMSELoss.py   # スコアベース損失
 │   └── evaluation/
-│       └── ProvenceEvaluator.py # 評価メトリクス
+│       └── reranking.py        # 既存にProvence評価追加
 ├── utils/
-│   └── multilingual_chunker.py # 言語別文分割
+│   └── text_chunking.py        # 言語別文分割（新規）
+└── models/                      # Provence固有のモデル部品
+    └── ProvencePruningHead.py  # Pruning head実装
 ```
+
+**設計方針の変更**：
+- 既存のCrossEncoderクラスを拡張（別クラスではなく）
+- 既存ファイルへの最小限の変更で機能追加
+- models/にProvence固有のコンポーネントを配置
 
 ### 主要コンポーネント
 
-#### 1. ProvenceCrossEncoder
+#### 1. CrossEncoder拡張
 
 ```python
-class ProvenceCrossEncoder(CrossEncoder):
-    """
-    Provenceアーキテクチャに基づくCrossEncoder拡張
-    - Reranking: クエリ・文書ペアの関連性スコア
-    - Pruning: 文レベルの保持/削除マスク
-    """
+from typing import Union, Optional, Dict, List, Tuple
+import numpy as np
+from sentence_transformers.models import ProvencePruningHead
+
+class CrossEncoder:
+    """既存のCrossEncoderクラスにProvence機能を統合"""
     
     def __init__(self, 
                  model_name: str,
                  num_labels: int = 1,
-                 enable_pruning: bool = True,
+                 max_length: int = 512,
+                 device: Optional[str] = None,
+                 tokenizer_args: Optional[Dict] = None,
+                 automodel_args: Optional[Dict] = None,
+                 default_activation_function=None,
+                 classifier_dropout: Optional[float] = None,
+                 # Provence拡張パラメータ
+                 enable_pruning: bool = False,
                  pruning_head_config: Optional[Dict] = None,
                  **kwargs):
-        # 親クラスの初期化
-        super().__init__(model_name, num_labels, **kwargs)
+        """
+        Args:
+            enable_pruning: Pruning機能を有効化
+            pruning_head_config: Pruning headの設定
+        """
+        # 既存の初期化処理...
         
-        # Pruning head追加
-        if enable_pruning:
+        # Provence拡張
+        self.enable_pruning = enable_pruning
+        if enable_pruning and self.model:
             self._add_pruning_head(pruning_head_config)
     
-    def predict(self, sentences, **kwargs) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
-        """予測: ranking scoreとoptionalなpruning mask"""
-        
-    def predict_with_pruning(self, queries, documents, **kwargs) -> ProvenceOutput:
+    def _add_pruning_head(self, config: Optional[Dict] = None):
+        """Pruning headを追加"""
+        from sentence_transformers.models import ProvencePruningHead
+        config = config or {}
+        self.pruning_head = ProvencePruningHead(
+            hidden_size=self.model.config.hidden_size,
+            **config
+        )
+    
+    def predict_with_pruning(self, 
+                           queries: List[str], 
+                           documents: List[str], 
+                           **kwargs) -> 'ProvenceOutput':
         """Provence特有の出力形式"""
+        if not self.enable_pruning:
+            raise ValueError("Pruning is not enabled. Initialize with enable_pruning=True")
         
-    def prune(self, query: str, document: str, threshold: float = 0.5) -> str:
+    def prune(self, 
+              query: str, 
+              document: str, 
+              threshold: float = 0.5,
+              min_sentences: int = 1) -> str:
         """文書のプルーニング実行"""
+        
+    def save_pretrained(self, path: str):
+        """Pruning headも含めて保存"""
+        # 既存の保存処理...
+        if self.enable_pruning:
+            # Pruning headの保存処理
+            pass
+            
+    @classmethod
+    def from_pretrained(cls, model_name_or_path: str, **kwargs):
+        """Pruning head対応のロード"""
+        # Provence設定の自動検出
+        # 既存のロード処理を拡張
 ```
 
 #### 2. データ構造
@@ -108,23 +156,33 @@ class ProvenceOutput:
 #### 3. 損失関数設計
 
 ```python
+import torch
+import torch.nn as nn
+from sentence_transformers.cross_encoder.losses import BinaryCrossEntropyLoss
+
 class ProvenceLoss(nn.Module):
     """統合損失関数: Reranking + Pruning"""
     
     def __init__(self,
-                 ranking_loss_fn: nn.Module = BinaryCrossEntropyLoss(),
-                 pruning_loss_fn: nn.Module = nn.BCEWithLogitsLoss(),
+                 ranking_loss_fn: Optional[nn.Module] = None,
+                 pruning_loss_fn: Optional[nn.Module] = None,
                  ranking_weight: float = 1.0,
                  pruning_weight: float = 0.5,
                  use_teacher_scores: bool = False):
         """
         Args:
-            ranking_loss_fn: Reranking用損失関数
-            pruning_loss_fn: Pruning用損失関数
+            ranking_loss_fn: Reranking用損失関数（デフォルト: BinaryCrossEntropyLoss）
+            pruning_loss_fn: Pruning用損失関数（デフォルト: BCEWithLogitsLoss）
             ranking_weight: Ranking損失の重み
             pruning_weight: Pruning損失の重み
             use_teacher_scores: 教師モデルのスコアを使用するか
         """
+        super().__init__()
+        self.ranking_loss_fn = ranking_loss_fn or BinaryCrossEntropyLoss()
+        self.pruning_loss_fn = pruning_loss_fn or nn.BCEWithLogitsLoss()
+        self.ranking_weight = ranking_weight
+        self.pruning_weight = pruning_weight
+        self.use_teacher_scores = use_teacher_scores
 ```
 
 #### 4. データフォーマット拡張
@@ -144,18 +202,74 @@ class ProvenceLoss(nn.Module):
 #### 5. 言語対応チャンカー
 
 ```python
+from typing import List, Tuple, Optional
+import langdetect
+
 class MultilingualChunker:
-    """言語別の文分割器"""
+    """言語別の文分割器（参考: lm-trainers/pruning/scripts/multilingual_chunkers.py）"""
     
-    @staticmethod
-    def chunk_text(text: str, language: str = "auto") -> List[Tuple[str, Tuple[int, int]]]:
-        """テキストを文に分割し、位置情報も返す"""
+    def __init__(self):
+        self._chunkers = {}  # 言語別チャンカーのキャッシュ
+    
+    def chunk_text(self, 
+                   text: str, 
+                   language: str = "auto",
+                   preserve_whitespace: bool = True) -> List[Tuple[str, Tuple[int, int]]]:
+        """
+        テキストを文に分割し、位置情報も返す
         
+        Args:
+            text: 分割対象のテキスト
+            language: 言語コード（"ja", "en", "auto"）
+            preserve_whitespace: 空白文字を保持するか
+            
+        Returns:
+            List[(文, (開始位置, 終了位置))]
+        """
+        if language == "auto":
+            language = self._detect_language(text)
+        
+        chunker = self._get_chunker(language)
+        return chunker.chunk(text, preserve_whitespace)
+    
+    def _detect_language(self, text: str) -> str:
+        """言語を自動検出"""
+        try:
+            return langdetect.detect(text)
+        except:
+            return "en"  # フォールバック
+    
+    def _get_chunker(self, language: str):
+        """言語別のチャンカーを取得（遅延ロード）"""
+        if language not in self._chunkers:
+            if language == "ja":
+                from sentence_transformers.utils.japanese_chunker import JapaneseChunker
+                self._chunkers[language] = JapaneseChunker()
+            elif language == "zh":
+                from sentence_transformers.utils.chinese_chunker import ChineseChunker
+                self._chunkers[language] = ChineseChunker()
+            else:
+                from sentence_transformers.utils.default_chunker import DefaultChunker
+                self._chunkers[language] = DefaultChunker()
+        return self._chunkers[language]
+    
     @staticmethod
     def reconstruct_text(sentences: List[str], 
                         masks: List[bool], 
-                        positions: List[Tuple[int, int]]) -> str:
+                        positions: List[Tuple[int, int]],
+                        original_text: Optional[str] = None) -> str:
         """マスクに基づいてテキストを再構築"""
+        if original_text and positions:
+            # 位置情報を使用して正確に再構築
+            result = []
+            for sent, mask, (start, end) in zip(sentences, masks, positions):
+                if mask:
+                    # 元のテキストから空白も含めて抽出
+                    result.append(original_text[start:end])
+            return "".join(result)
+        else:
+            # 位置情報なしの場合は簡易的に結合
+            return " ".join(sent for sent, mask in zip(sentences, masks) if mask)
 ```
 
 ## データフォーマット
@@ -171,7 +285,9 @@ class MultilingualChunker:
 ```
 
 ### 利用可能なデータセット
-- **hotchpotch/wip-query-context-pruner**: 日本語Wikipedia QAベース（約130万サンプル）
+- **hotchpotch/wip-query-context-pruner**: バイリンガルQAデータセット（約130万サンプル）
+  - 日本語（約61%）と英語（約39%）の混在データ
+  - MS MARCO（英語/日本語翻訳版）が全体の約78%
   - 現在は開発中フォーマット、変換が必要
   - 詳細は[text-pruner-dataset.md](./text-pruner-dataset.md)参照
 
@@ -357,6 +473,11 @@ class ProvenceEvaluator:
 - 文分割結果のキャッシュ
 - バッチサイズの動的調整
 - Mixed precision対応
+
+# バックエンドサポート
+- PyTorch（フル機能）
+- ONNX（Reranking機能のみ、Pruningは未対応）
+- OpenVINO（Reranking機能のみ、Pruningは未対応）
 ```
 
 ### 3. エラーハンドリング
