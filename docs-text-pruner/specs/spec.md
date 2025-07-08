@@ -7,6 +7,7 @@
 - 2025-01-08: トークンレベルプルーニング実装完了、ja-minimal評価済み
 - 2025-01-08: チャンクベース評価システム実装、3モデル（minimal, small, full）学習完了
 - 2025-01-09: Provence → Pruning リネーム、pruning-onlyモード実装
+- 2025-01-09: デュアルモードアーキテクチャ完成、F2評価結果更新、両モード対応のデータ構造実装
 
 ## 概要
 
@@ -15,7 +16,14 @@ Sentence TransformersにProvence論文ベースのtext-pruner機能を実装す�
 ### 動作モード
 
 1. **reranking_pruning** (デフォルト): ランキングとプルーニングの両方を行う統合モード
-2. **pruning_only**: プルーニングのみを行う軽量モード（`cl-nagoya/ruri-v3-30m`等の小型モデルに最適）
+   - ベースモデル: `hotchpotch/japanese-reranker-xsmall-v2`
+   - 出力: `RerankingPruningOutput`（ランキングスコア + プルーニングマスク）
+   - 用途: 高性能なRAGパイプライン、完全な機能が必要な場合
+
+2. **pruning_only**: プルーニングのみを行う軽量モード
+   - ベースモデル: `cl-nagoya/ruri-v3-30m`等の小型モデル
+   - 出力: `PruningOnlyOutput`（プルーニングマスクのみ）
+   - 用途: 計算コストを抑えたテキスト圧縮、プルーニング専用タスク
 
 ## 実装ステータス
 
@@ -31,6 +39,9 @@ Sentence TransformersにProvence論文ベースのtext-pruner機能を実装す�
 - [x] 閾値最適化（F2スコアベース）
 - [x] pruning-onlyモード実装（軽量モデル対応）
 - [x] 包括的なモードテスト実装
+- [x] デュアルモードアーキテクチャ（reranking_pruning + pruning_only）
+- [x] モード専用データ構造（RerankingPruningOutput, PruningOnlyOutput）
+- [x] 全テストセット完全評価（F2スコア最適化）
 - [ ] ドキュメント作成（API仕様等）
 - [ ] PR作成
 
@@ -44,10 +55,16 @@ Sentence TransformersにProvence論文ベースのtext-pruner機能を実装す�
 ### 学習結果サマリー
 
 #### モデル性能比較（ja-fullデータセット、F2最適: トークン0.3/チャンク0.5）
-| モデル | POS Recall | POS FN | NEG Precision | NEG FP | 総合評価 |
-|--------|-----------|--------|---------------|--------|----------|
-| ja-small | 89.85% | 27 | 75.41% | 30 | 汎化性能高 |
-| ja-full | 94.36% | 15 | 89.13% | 10 | 最高性能 |
+| モデル | POS Recall | POS FN | NEG Precision | NEG FP | F2スコア | 総合評価 |
+|--------|-----------|--------|---------------|--------|----------|----------|
+| ja-small | 89.85% | 27 | 75.41% | 30 | 0.882 | 汎化性能高 |
+| ja-full | **94.36%** | **15** | **89.13%** | **10** | 0.862 | 最高性能 |
+
+#### 実装モード別性能
+| モード | 基本モデル | 主要用途 | 計算効率 | 実装状況 |
+|--------|-----------|----------|----------|----------|
+| reranking_pruning | japanese-reranker-xsmall-v2 | 高精度RAG | 中程度 | ✅ 完了 |
+| pruning_only | cl-nagoya/ruri-v3-30m | 軽量テキスト圧縮 | 高効率 | ✅ 完了 |
 
 #### 学習設定比較
 | パラメータ | ja-minimal | ja-small | ja-full |
@@ -66,6 +83,8 @@ Sentence TransformersにProvence論文ベースのtext-pruner機能を実装す�
 - 多段階閾値: トークンレベルとチャンクレベルの2段階制御
 - POS/NEG分離評価: 関連/非関連文書で異なる最適化戦略
 - マルチモード対応: reranking_pruning/pruning_onlyの選択可能
+- 専用データ構造: RerankingPruningOutput/PruningOnlyOutputで最適化
+- 全テストセット評価: F2スコアベースの性能最適化完了
 
 ## アーキテクチャ設計
 
@@ -92,11 +111,11 @@ Sentence TransformersにProvence論文ベースのtext-pruner機能を実装す�
 sentence_transformers/
 ├── pruning/                     # Pruning実装（旧provence/、実装済み）
 │   ├── __init__.py
-│   ├── encoder.py              # PruningEncoderクラス（マルチモード対応）
-│   ├── losses.py               # PruningLoss（モード対応）
-│   ├── data_collator.py        # PruningDataCollator（モード対応）
+│   ├── encoder.py              # PruningEncoderクラス（デュアルモード対応）
+│   ├── losses.py               # PruningLoss（モード自動判定）
+│   ├── data_collator.py        # PruningDataCollator（モード自動判定）
 │   ├── trainer.py              # PruningTrainer
-│   ├── data_structures.py      # データ構造定義（PruningOnlyOutput追加）
+│   ├── data_structures.py      # データ構造定義（RerankingPruningOutput, PruningOnlyOutput）
 │   └── models/
 │       └── pruning_head.py     # プルーニングヘッド実装
 ├── utils/
@@ -105,11 +124,13 @@ sentence_transformers/
 scripts/                         # 学習・評価スクリプト（実装済み）
 ├── train_pruning.py            # 統合学習スクリプト（全サイズ対応）
 ├── evaluate_pruning.py         # 統合評価スクリプト
+├── evaluate_pruning_f2.py      # F2スコア最適化評価
 ├── train_pruning_only.py       # pruning-onlyモード学習
-└── test_pruning_modes.py       # モード別動作確認テスト
+├── test_pruning_modes.py       # モード別動作確認テスト
+└── analyze_pruning_models.py   # モデル性能分析
 
 tests/pruning/                   # テスト（実装済み）
-└── test_pruning_modes.py       # 包括的なモードテスト
+└── test_pruning_modes.py       # デュアルモード包括テスト（save/load含む）
 ```
 
 **実装アプローチ**：
@@ -1008,6 +1029,34 @@ results = model.prune_texts(
 for r in results:
     print(f"Kept: {r[\"kept_ratio\"]:.1%}")
     print(f"Pruned text: {r[\"pruned_text\"]}")
+```
+
+### 3. 完全なテストセット評価での性能確認
+
+```python
+from sentence_transformers.pruning import PruningEncoder
+from datasets import load_dataset
+
+# 学習済みモデルのロード
+model = PruningEncoder.from_pretrained("./outputs/pruning-ja-full")
+
+# 評価データセット
+dataset = load_dataset('hotchpotch/wip-query-context-pruner-with-teacher-scores', 'ja-full')
+test_dataset = dataset['test']
+
+# F2最適化閾値での評価
+results = model.predict_context(
+    test_dataset,
+    token_threshold=0.3,
+    chunk_threshold=0.5,
+    batch_size=32
+)
+
+# 評価結果の確認
+print(f"POS Recall: {results['pos_recall']:.2%}")
+print(f"NEG Precision: {results['neg_precision']:.2%}")
+print(f"F2 Score: {results['f2_score']:.3f}")
+print(f"Compression Ratio: {results['compression_ratio']:.1%}")
 ```
 
 ### 3. データセット要件

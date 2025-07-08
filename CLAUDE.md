@@ -53,16 +53,19 @@ uv run python tmp/sample.py   # tmpディレクトリのサンプルコード実
    - 動的なpruning比率の決定（0-100%）
    - hotchpotch/japanese-reranker-xsmall-v2ベースで実装
 
-3. **実装済みコンポーネント**:
+4. **実装済みコンポーネント**:
    - `sentence_transformers/pruning/` - Pruning実装（旧provence/）
-     - `encoder.py` - PruningEncoderクラス（メインクラス、将来的にpruning-onlyモードも対応予定）
-     - `losses.py` - PruningLoss（統合損失関数）
+     - `encoder.py` - PruningEncoderクラス（デュアルモード対応完了）
+     - `losses.py` - PruningLoss（モード自動判定損失関数）
      - `trainer.py` - PruningTrainer
-     - `data_structures.py` - RerankingPruningOutput、PruningOutput等のデータ構造
+     - `data_structures.py` - RerankingPruningOutput、PruningOnlyOutput等のデータ構造
      - `models/pruning_head.py` - PruningHead（プルーニング用ヘッド）
    - `scripts/` - 学習・評価スクリプト群
      - `train_pruning.py` - 統合学習スクリプト（minimal/small/full対応）
      - `evaluate_pruning.py` - 統合評価スクリプト
+     - `evaluate_pruning_f2.py` - F2スコア最適化評価
+     - `train_pruning_only.py` - pruning-onlyモード学習
+     - `test_pruning_modes.py` - デュアルモード動作確認テスト
    - 学習済みモデル:
      - minimal: 2エポック完了（F2=0.832、圧縮率48.4%）
      - small: 1.46エポック完了（F2=0.882、圧縮率53.1%）※2エポックで十分と判明
