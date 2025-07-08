@@ -1,0 +1,97 @@
+2025-07-09 07:12:41,510 - __main__ - INFO - 
+==================================================
+2025-07-09 07:12:41,510 - __main__ - INFO - Testing SAVE/LOAD functionality
+2025-07-09 07:12:41,510 - __main__ - INFO - ==================================================
+
+2025-07-09 07:12:44,427 - __main__ - INFO - ✓ Saved reranking_pruning model to /tmp/tmp5e3pkwx8/test_model
+2025-07-09 07:12:45,140 - __main__ - INFO - ✓ Loaded reranking_pruning model successfully
+2025-07-09 07:12:46,913 - __main__ - INFO - ✓ Saved pruning_only model to /tmp/tmp8qrggvxl/test_model
+2025-07-09 07:12:47,452 - __main__ - INFO - ✓ Loaded pruning_only model successfully
+2025-07-09 07:12:47,488 - __main__ - INFO - 
+✅ SAVE/LOAD functionality test PASSED
+
+2025-07-09 07:12:47,594 - __main__ - INFO - 
+==================================================
+2025-07-09 07:12:47,594 - __main__ - INFO - Testing RERANKING + PRUNING mode with minimal dataset
+2025-07-09 07:12:47,594 - __main__ - INFO - ==================================================
+
+2025-07-09 07:12:47,594 - __main__ - INFO - Loading dataset: hotchpotch/wip-query-context-pruner-with-teacher-scores/ja-minimal
+2025-07-09 07:12:52,255 - __main__ - INFO - Initializing PruningEncoder in reranking_pruning mode
+2025-07-09 07:12:53,501 - __main__ - INFO - ✓ Model initialized successfully
+2025-07-09 07:12:53,501 - __main__ - INFO - ✓ Data collator initialized successfully
+2025-07-09 07:12:53,523 - __main__ - INFO - ✓ Data collation successful. Batch keys: dict_keys(['ranking_targets', 'pruning_labels', 'batch_indices', 'doc_indices', 'docs_per_query'])
+2025-07-09 07:12:53,523 - __main__ - INFO - ✓ All required label columns present
+2025-07-09 07:12:53,523 - __main__ - INFO - ✓ Loss function initialized successfully
+2025-07-09 07:12:53,553 - __main__ - INFO - ✓ Forward pass successful. Output keys: dict_keys(['ranking_logits', 'pruning_logits', 'hidden_states'])
+2025-07-09 07:12:53,781 - __main__ - INFO - ✓ Loss computation successful. Loss value: 0.5654
+2025-07-09 07:12:53,790 - __main__ - INFO - ✓ Predict (ranking only) successful. Score: [0.09681489]
+2025-07-09 07:12:53,797 - __main__ - INFO - ✓ Predict with pruning successful. Compression ratio: 0.33
+2025-07-09 07:12:53,797 - __main__ - INFO - 
+✅ RERANKING + PRUNING mode test PASSED for minimal dataset
+
+2025-07-09 07:12:53,902 - __main__ - INFO - 
+==================================================
+2025-07-09 07:12:53,903 - __main__ - INFO - Testing PRUNING-ONLY mode with minimal dataset
+2025-07-09 07:12:53,903 - __main__ - INFO - ==================================================
+
+2025-07-09 07:12:53,903 - __main__ - INFO - Loading dataset: hotchpotch/wip-query-context-pruner-with-teacher-scores/ja-minimal
+2025-07-09 07:12:56,937 - __main__ - INFO - Initializing PruningEncoder in pruning_only mode
+2025-07-09 07:12:58,138 - __main__ - INFO - ✓ Model initialized successfully
+2025-07-09 07:12:58,138 - __main__ - INFO - ✓ Data collator initialized successfully
+2025-07-09 07:12:58,139 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 07:12:58,160 - __main__ - INFO - ✓ Data collation successful. Batch keys: dict_keys(['pruning_labels', 'batch_indices', 'doc_indices', 'docs_per_query'])
+2025-07-09 07:12:58,160 - __main__ - INFO - ✓ Label columns correct for pruning_only mode
+2025-07-09 07:12:58,160 - __main__ - INFO - ✓ Loss function initialized successfully
+2025-07-09 07:12:58,193 - __main__ - INFO - ✓ Forward pass successful. Output keys: dict_keys(['pruning_logits', 'hidden_states'])
+2025-07-09 07:12:58,427 - __main__ - INFO - ✓ Loss computation successful. Loss value: 0.6316
+2025-07-09 07:12:58,427 - __main__ - INFO - ✓ Correctly raised error for predict without pruning: predict() returns ranking scores and is not available in pruning_only mode. Use prune_texts() or set apply_pruning=True.
+2025-07-09 07:12:58,439 - __main__ - INFO - ✓ prune_texts successful. First result: kept_ratio=0.62
+2025-07-09 07:12:58,447 - __main__ - INFO - ✓ Predict with pruning successful. Compression ratio: 0.67
+2025-07-09 07:12:58,447 - __main__ - INFO - 
+✅ PRUNING-ONLY mode test PASSED for minimal dataset
+
+2025-07-09 07:12:58,552 - __main__ - INFO - 
+==================================================
+2025-07-09 07:12:58,552 - __main__ - INFO - Testing RERANKING + PRUNING mode with small dataset
+2025-07-09 07:12:58,552 - __main__ - INFO - ==================================================
+
+2025-07-09 07:12:58,552 - __main__ - INFO - Loading dataset: hotchpotch/wip-query-context-pruner-with-teacher-scores/ja-small
+2025-07-09 07:13:01,265 - __main__ - INFO - Initializing PruningEncoder in reranking_pruning mode
+2025-07-09 07:13:02,297 - __main__ - INFO - ✓ Model initialized successfully
+2025-07-09 07:13:02,297 - __main__ - INFO - ✓ Data collator initialized successfully
+2025-07-09 07:13:02,317 - __main__ - INFO - ✓ Data collation successful. Batch keys: dict_keys(['ranking_targets', 'pruning_labels', 'batch_indices', 'doc_indices', 'docs_per_query'])
+2025-07-09 07:13:02,317 - __main__ - INFO - ✓ All required label columns present
+2025-07-09 07:13:02,317 - __main__ - INFO - ✓ Loss function initialized successfully
+2025-07-09 07:13:02,345 - __main__ - INFO - ✓ Forward pass successful. Output keys: dict_keys(['ranking_logits', 'pruning_logits', 'hidden_states'])
+2025-07-09 07:13:02,518 - __main__ - INFO - ✓ Loss computation successful. Loss value: 0.4976
+2025-07-09 07:13:02,527 - __main__ - INFO - ✓ Predict (ranking only) successful. Score: [0.09681489]
+2025-07-09 07:13:02,534 - __main__ - INFO - ✓ Predict with pruning successful. Compression ratio: 1.00
+2025-07-09 07:13:02,534 - __main__ - INFO - 
+✅ RERANKING + PRUNING mode test PASSED for small dataset
+
+2025-07-09 07:13:02,626 - __main__ - INFO - 
+==================================================
+2025-07-09 07:13:02,626 - __main__ - INFO - Testing PRUNING-ONLY mode with small dataset
+2025-07-09 07:13:02,626 - __main__ - INFO - ==================================================
+
+2025-07-09 07:13:02,626 - __main__ - INFO - Loading dataset: hotchpotch/wip-query-context-pruner-with-teacher-scores/ja-small
+2025-07-09 07:13:04,834 - __main__ - INFO - Initializing PruningEncoder in pruning_only mode
+2025-07-09 07:13:06,050 - __main__ - INFO - ✓ Model initialized successfully
+2025-07-09 07:13:06,050 - __main__ - INFO - ✓ Data collator initialized successfully
+2025-07-09 07:13:06,051 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 07:13:06,072 - __main__ - INFO - ✓ Data collation successful. Batch keys: dict_keys(['pruning_labels', 'batch_indices', 'doc_indices', 'docs_per_query'])
+2025-07-09 07:13:06,072 - __main__ - INFO - ✓ Label columns correct for pruning_only mode
+2025-07-09 07:13:06,072 - __main__ - INFO - ✓ Loss function initialized successfully
+2025-07-09 07:13:06,099 - __main__ - INFO - ✓ Forward pass successful. Output keys: dict_keys(['pruning_logits', 'hidden_states'])
+2025-07-09 07:13:06,270 - __main__ - INFO - ✓ Loss computation successful. Loss value: 0.6705
+2025-07-09 07:13:06,270 - __main__ - INFO - ✓ Correctly raised error for predict without pruning: predict() returns ranking scores and is not available in pruning_only mode. Use prune_texts() or set apply_pruning=True.
+2025-07-09 07:13:06,281 - __main__ - INFO - ✓ prune_texts successful. First result: kept_ratio=0.62
+2025-07-09 07:13:06,289 - __main__ - INFO - ✓ Predict with pruning successful. Compression ratio: 0.00
+2025-07-09 07:13:06,289 - __main__ - INFO - 
+✅ PRUNING-ONLY mode test PASSED for small dataset
+
+2025-07-09 07:13:06,383 - __main__ - INFO - 
+==================================================
+2025-07-09 07:13:06,383 - __main__ - INFO - 🎉 ALL TESTS PASSED! 🎉
+2025-07-09 07:13:06,383 - __main__ - INFO - ==================================================
+

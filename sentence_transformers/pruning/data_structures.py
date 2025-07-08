@@ -46,13 +46,26 @@ class PruningOnlyOutput:
     Output dataclass for pruning-only mode (no ranking).
     
     Attributes:
+        pruning_masks: Binary masks indicating which tokens to keep [batch_size, seq_len]
         pruning_logits: Raw pruning logits from the model [batch_size, seq_len, 2]
-        pruning_mask: Binary mask for token-level pruning [batch_size, seq_len]
-        hidden_states: Hidden states from the encoder (optional)
+        pruning_probs: Pruning probabilities for each token [batch_size, seq_len, 2]
+        sentences: List of tokens for each document
+        compression_ratio: Average compression ratio achieved
+        num_pruned_tokens: Total number of tokens pruned
+        pruned_documents: Pruned documents (if return_documents=True)
     """
-    pruning_logits: torch.Tensor
-    pruning_mask: Optional[torch.Tensor] = None
-    hidden_states: Optional[torch.Tensor] = None
+    # Pruning outputs
+    pruning_masks: Optional[np.ndarray] = None       # [batch_size, seq_len]
+    pruning_logits: Optional[torch.Tensor] = None    # [batch_size, seq_len, 2]
+    pruning_probs: Optional[np.ndarray] = None       # [batch_size, seq_len, 2]
+    
+    # Token information
+    sentences: Optional[List[List[str]]] = None      # Tokens for each document
+    
+    # Metadata
+    compression_ratio: Optional[float] = None
+    num_pruned_tokens: Optional[int] = None
+    pruned_documents: Optional[List[str]] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary format for serialization."""

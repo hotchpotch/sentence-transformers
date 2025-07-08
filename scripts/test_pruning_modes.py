@@ -17,6 +17,9 @@ from datasets import load_dataset
 from sentence_transformers.pruning import (
     PruningEncoder, PruningTrainer, PruningLoss, PruningDataCollator
 )
+from sentence_transformers.pruning.data_structures import (
+    RerankingPruningOutput, PruningOnlyOutput
+)
 
 # Setup logging
 logging.basicConfig(
@@ -107,7 +110,9 @@ def test_reranking_pruning_mode(dataset_name: str = 'minimal'):
         
         # Test predict with pruning
         output_with_pruning = model.predict(test_pair, apply_pruning=True, return_documents=True)
+        assert isinstance(output_with_pruning, RerankingPruningOutput), f"Expected RerankingPruningOutput, got {type(output_with_pruning)}"
         logger.info(f"✓ Predict with pruning successful. Compression ratio: {output_with_pruning.compression_ratio:.2f}")
+        logger.info(f"✓ Output type is correct: {type(output_with_pruning).__name__}")
         
         logger.info(f"\n✅ RERANKING + PRUNING mode test PASSED for {dataset_name} dataset\n")
         return True
@@ -210,7 +215,9 @@ def test_pruning_only_mode(dataset_name: str = 'minimal'):
         
         # Test predict with pruning (should work)
         output_with_pruning = model.predict(test_pair, apply_pruning=True, return_documents=True)
+        assert isinstance(output_with_pruning, PruningOnlyOutput), f"Expected PruningOnlyOutput, got {type(output_with_pruning)}"
         logger.info(f"✓ Predict with pruning successful. Compression ratio: {output_with_pruning.compression_ratio:.2f}")
+        logger.info(f"✓ Output type is correct: {type(output_with_pruning).__name__}")
         
         logger.info(f"\n✅ PRUNING-ONLY mode test PASSED for {dataset_name} dataset\n")
         return True

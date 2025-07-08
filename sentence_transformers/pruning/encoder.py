@@ -26,7 +26,7 @@ from tqdm import tqdm
 
 from sentence_transformers.util import import_from_string, fullname
 from sentence_transformers.utils.text_chunking import MultilingualChunker
-from .data_structures import PruningConfig, RerankingPruningOutput, PruningOutput
+from .data_structures import PruningConfig, RerankingPruningOutput, PruningOutput, PruningOnlyOutput
 from .models.pruning_head import PruningHead, PruningHeadConfig
 
 logger = logging.getLogger(__name__)
@@ -335,7 +335,7 @@ class PruningEncoder(nn.Module):
         pruning_threshold: float = 0.5,
         return_documents: bool = False,
         show_progress_bar: bool = False,
-    ) -> Union[RerankingPruningOutput, List[RerankingPruningOutput]]:
+    ) -> Union[RerankingPruningOutput, PruningOnlyOutput, List[Union[RerankingPruningOutput, PruningOnlyOutput]]]:
         """
         Predict with token-level pruning.
         
@@ -347,7 +347,7 @@ class PruningEncoder(nn.Module):
             show_progress_bar: Show progress bar
             
         Returns:
-            RerankingPruningOutput or list of RerankingPruningOutput
+            RerankingPruningOutput/PruningOnlyOutput or list of them based on mode
         """
         self.eval()
         
@@ -453,14 +453,22 @@ class PruningEncoder(nn.Module):
                                     pruned_parts.append(document[start:end])
                                 pruned_doc = " ".join(pruned_parts)
                         
-                        # Create output (compatible with original format)
-                        output = RerankingPruningOutput(
-                            ranking_scores=ranking_scores[i].cpu().item(),  # Convert to scalar
-                            pruning_masks=np.array([keep_mask.cpu().numpy()]),
-                            sentences=[doc_tokens],  # Store tokens instead of sentences
-                            compression_ratio=compression_ratio,
-                            num_pruned_sentences=num_total - num_kept  # Actually num pruned tokens
-                        )
+                        # Create output based on mode
+                        if self.mode == "reranking_pruning":
+                            output = RerankingPruningOutput(
+                                ranking_scores=ranking_scores[i].cpu().item(),
+                                pruning_masks=np.array([keep_mask.cpu().numpy()]),
+                                sentences=[doc_tokens],  # Store tokens instead of sentences
+                                compression_ratio=compression_ratio,
+                                num_pruned_sentences=num_total - num_kept  # Actually num pruned tokens
+                            )
+                        else:  # pruning_only
+                            output = PruningOnlyOutput(
+                                pruning_masks=np.array([keep_mask.cpu().numpy()]),
+                                sentences=[doc_tokens],  # Store tokens
+                                compression_ratio=compression_ratio,
+                                num_pruned_tokens=num_total - num_kept
+                            )
                         
                         if return_documents:
                             output.pruned_documents = [pruned_doc]
@@ -468,13 +476,21 @@ class PruningEncoder(nn.Module):
                         all_outputs.append(output)
                     else:
                         # Failed to find document boundaries, create empty output
-                        output = RerankingPruningOutput(
-                            ranking_scores=ranking_scores[i].cpu().item(),  # Convert to scalar
-                            pruning_masks=np.array([[]]),
-                            sentences=[[]],
-                            compression_ratio=0.0,
-                            num_pruned_sentences=0
-                        )
+                        if self.mode == "reranking_pruning":
+                            output = RerankingPruningOutput(
+                                ranking_scores=ranking_scores[i].cpu().item(),
+                                pruning_masks=np.array([[]]),
+                                sentences=[[]],
+                                compression_ratio=0.0,
+                                num_pruned_sentences=0
+                            )
+                        else:  # pruning_only
+                            output = PruningOnlyOutput(
+                                pruning_masks=np.array([[]]),
+                                sentences=[[]],
+                                compression_ratio=0.0,
+                                num_pruned_tokens=0
+                            )
                         if return_documents:
                             output.pruned_documents = [""]
                         all_outputs.append(output)
@@ -702,7 +718,7 @@ class PruningEncoder(nn.Module):
                 "pruned_document": output.pruned_documents[0],
                 "sentences": [],  # Not applicable for token-level pruning
                 "pruning_masks": [],  # Not applicable
-                "ranking_score": float(output.ranking_scores),
+                "ranking_score": float(output.ranking_scores) if hasattr(output, 'ranking_scores') and output.ranking_scores is not None else None,
                 "compression_ratio": output.compression_ratio,
                 "num_pruned_sentences": 0  # Not applicable
             }

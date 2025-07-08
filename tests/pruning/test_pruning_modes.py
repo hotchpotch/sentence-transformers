@@ -10,6 +10,9 @@ from datasets import load_dataset
 from sentence_transformers.pruning import (
     PruningEncoder, PruningTrainer, PruningLoss, PruningDataCollator
 )
+from sentence_transformers.pruning.data_structures import (
+    RerankingPruningOutput, PruningOnlyOutput
+)
 
 
 class TestPruningModes:
@@ -259,3 +262,33 @@ class TestPruningModes:
         assert model2.mode == "pruning_only"
         assert model2.ranking_model is None
         assert model2.encoder is not None
+    def test_output_types(self):
+        """Test that correct output types are returned based on mode."""
+        # Reranking + Pruning mode
+        model1 = PruningEncoder(
+            model_name_or_path="hotchpotch/japanese-reranker-xsmall-v2",
+            mode="reranking_pruning",
+            device="cpu"
+        )
+        
+        output1 = model1.predict(
+            ("query", "document"),
+            apply_pruning=True
+        )
+        assert isinstance(output1, RerankingPruningOutput), \
+            f"Expected RerankingPruningOutput, got {type(output1)}"
+        
+        # Pruning-only mode
+        model2 = PruningEncoder(
+            model_name_or_path="cl-nagoya/ruri-v3-30m",
+            mode="pruning_only",
+            device="cpu",
+            pruning_config={"hidden_size": 256}
+        )
+        
+        output2 = model2.predict(
+            ("query", "document"),
+            apply_pruning=True
+        )
+        assert isinstance(output2, PruningOnlyOutput), \
+            f"Expected PruningOnlyOutput, got {type(output2)}"
