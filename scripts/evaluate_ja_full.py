@@ -60,7 +60,7 @@ def evaluate_model(model_path: str, dataset_subset: str = 'ja-full'):
     
     # ランキングスコア予測
     print("  ランキングスコア予測中...")
-    ranking_scores = model.predict(all_pairs, batch_size=64, show_progress_bar=True)
+    ranking_scores = model.predict(all_pairs, batch_size=64, show_progress_bar=True, apply_pruning=False)
     all_predictions = ranking_scores
     all_labels = np.array(all_pair_labels)
     all_teacher_scores = np.array(all_pair_teacher_scores)

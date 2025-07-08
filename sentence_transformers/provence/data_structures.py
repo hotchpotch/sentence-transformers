@@ -8,6 +8,38 @@ import numpy as np
 import torch
 
 
+@dataclass 
+class ProvenceContextOutput:
+    """
+    Output dataclass for chunk-based context predictions.
+    
+    Attributes:
+        ranking_scores: Reranking scores for each document [batch_size]
+        chunk_predictions: Chunk-level binary predictions [batch_size, num_chunks]
+        chunk_scores: Chunk-level keep probabilities [batch_size, num_chunks]
+        token_scores: Token-level keep probabilities [batch_size, seq_len]
+        chunk_positions: Original chunk positions [batch_size, num_chunks, 2]
+        compression_ratio: Ratio of chunks kept vs total chunks
+    """
+    ranking_scores: Optional[Union[float, np.ndarray]] = None
+    chunk_predictions: Optional[np.ndarray] = None       # [batch_size, num_chunks]
+    chunk_scores: Optional[np.ndarray] = None           # [batch_size, num_chunks]
+    token_scores: Optional[np.ndarray] = None           # [batch_size, seq_len]
+    chunk_positions: Optional[List[List[Tuple[int, int]]]] = None
+    compression_ratio: Optional[float] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary format for serialization."""
+        result = {}
+        for key, value in self.__dict__.items():
+            if value is not None:
+                if isinstance(value, (np.ndarray, torch.Tensor)):
+                    result[key] = value.tolist()
+                else:
+                    result[key] = value
+        return result
+
+
 @dataclass
 class ProvenceOutput:
     """

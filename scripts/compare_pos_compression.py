@@ -42,9 +42,10 @@ def evaluate_pos_compression(model_path: str, model_name: str, threshold: float 
     
     # バッチサイズ512で推論
     print(f"推論実行中 (batch_size=512)...")
-    outputs = model.predict_with_pruning(
+    outputs = model.predict(
         pos_pairs,
         batch_size=512,
+        apply_pruning=True,
         pruning_threshold=threshold,
         return_documents=True,
         show_progress_bar=True

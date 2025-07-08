@@ -22,7 +22,7 @@ from tqdm import tqdm
 
 from sentence_transformers.util import import_from_string, fullname
 from sentence_transformers.utils.text_chunking import MultilingualChunker
-from .data_structures import ProvenceConfig, ProvenceOutput
+from .data_structures import ProvenceConfig, ProvenceOutput, ProvenceContextOutput
 from .models.pruning_head import ProvencePruningHead, ProvencePruningConfig
 
 logger = logging.getLogger(__name__)
@@ -177,23 +177,42 @@ class ProvenceEncoder(nn.Module):
         show_progress_bar: bool = False,
         convert_to_numpy: bool = True,
         convert_to_tensor: bool = False,
-    ) -> Union[List[float], np.ndarray, torch.Tensor]:
+        apply_pruning: bool = True,
+        pruning_threshold: float = 0.5,
+        return_documents: bool = False,
+    ) -> Union[List[float], np.ndarray, torch.Tensor, List[ProvenceOutput]]:
         """
-        Predict ranking scores for query-document pairs.
+        Predict ranking scores and optionally apply pruning.
         
         Args:
             sentences: Query-document pairs
             batch_size: Batch size for prediction
             show_progress_bar: Show progress bar
-            convert_to_numpy: Convert to numpy array
-            convert_to_tensor: Convert to tensor
+            convert_to_numpy: Convert to numpy array (only for scores)
+            convert_to_tensor: Convert to tensor (only for scores)
+            apply_pruning: Whether to apply token-level pruning
+            pruning_threshold: Threshold for pruning decisions
+            return_documents: Whether to return pruned documents
             
         Returns:
-            Ranking scores
+            If apply_pruning is False: Ranking scores
+            If apply_pruning is True: List of ProvenceOutput objects
         """
+        if apply_pruning:
+            # Use predict_with_pruning for full functionality
+            return self.predict_with_pruning(
+                sentences=sentences,
+                batch_size=batch_size,
+                pruning_threshold=pruning_threshold,
+                return_documents=return_documents,
+                show_progress_bar=show_progress_bar,
+            )
+        
+        # Original predict behavior for ranking only
         self.eval()
         
-        if isinstance(sentences[0], str):
+        single_input = isinstance(sentences[0], str)
+        if single_input:
             sentences = [sentences]
         
         all_scores = []
@@ -227,12 +246,20 @@ class ProvenceEncoder(nn.Module):
                 
                 all_scores.extend(scores.cpu().tolist())
         
-        if convert_to_tensor:
-            return torch.tensor(all_scores)
-        elif convert_to_numpy:
-            return np.array(all_scores)
+        if single_input:
+            if convert_to_tensor:
+                return torch.tensor(all_scores)
+            elif convert_to_numpy:
+                return np.array(all_scores)
+            else:
+                return all_scores
         else:
-            return all_scores
+            if convert_to_tensor:
+                return torch.tensor(all_scores)
+            elif convert_to_numpy:
+                return np.array(all_scores)
+            else:
+                return all_scores
     
     def predict_with_pruning(
         self,
@@ -357,7 +384,7 @@ class ProvenceEncoder(nn.Module):
                         
                         # Create output (compatible with original format)
                         output = ProvenceOutput(
-                            ranking_scores=ranking_scores[i].cpu().numpy(),
+                            ranking_scores=ranking_scores[i].cpu().item(),  # Convert to scalar
                             pruning_masks=np.array([keep_mask.cpu().numpy()]),
                             sentences=[doc_tokens],  # Store tokens instead of sentences
                             compression_ratio=compression_ratio,
@@ -371,7 +398,7 @@ class ProvenceEncoder(nn.Module):
                     else:
                         # Failed to find document boundaries, create empty output
                         output = ProvenceOutput(
-                            ranking_scores=ranking_scores[i].cpu().numpy(),
+                            ranking_scores=ranking_scores[i].cpu().item(),  # Convert to scalar
                             pruning_masks=np.array([[]]),
                             sentences=[[]],
                             compression_ratio=0.0,
@@ -382,6 +409,191 @@ class ProvenceEncoder(nn.Module):
                         all_outputs.append(output)
         
         return all_outputs[0] if single_input else all_outputs
+    
+    def predict_context(
+        self,
+        sentences: List[Tuple[str, str]] | Tuple[str, str],
+        chunk_positions: List[List[List[Tuple[int, int]]]] | List[List[Tuple[int, int]]],
+        batch_size: int = 32,
+        token_threshold: float = 0.5,
+        chunk_threshold: float = 0.5,
+        show_progress_bar: bool = False,
+    ) -> Union[ProvenceContextOutput, List[ProvenceContextOutput]]:
+        """
+        Predict with chunk-based evaluation.
+        
+        Args:
+            sentences: Query-document pairs
+            chunk_positions: Chunk positions for each document [[start, end], ...]
+            batch_size: Batch size
+            token_threshold: Threshold for token-level predictions
+            chunk_threshold: Minimum ratio of tokens to consider chunk as relevant
+            show_progress_bar: Show progress bar
+            
+        Returns:
+            ProvenceContextOutput or list of ProvenceContextOutput
+        """
+        self.eval()
+        
+        single_input = isinstance(sentences[0], str)
+        if single_input:
+            sentences = [sentences]
+            chunk_positions = [chunk_positions]
+        
+        all_outputs = []
+        
+        for start_idx in tqdm(
+            range(0, len(sentences), batch_size),
+            desc="Batches",
+            disable=not show_progress_bar,
+        ):
+            batch = sentences[start_idx:start_idx + batch_size]
+            batch_chunks = chunk_positions[start_idx:start_idx + batch_size]
+            
+            # Tokenize with offset mapping
+            encoded = self.tokenizer(
+                batch,
+                padding=True,
+                truncation=True,
+                max_length=self.max_length,
+                return_tensors="pt",
+                return_offsets_mapping=True
+            )
+            
+            input_ids = encoded['input_ids'].to(self.device)
+            attention_mask = encoded['attention_mask'].to(self.device)
+            offset_mapping = encoded['offset_mapping']
+            
+            with torch.no_grad():
+                outputs = self.forward(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask
+                )
+                
+                # Get predictions
+                ranking_logits = outputs["ranking_logits"]
+                if self.num_labels == 1:
+                    ranking_scores = self.activation_fn(ranking_logits).squeeze(-1)
+                else:
+                    ranking_scores = torch.nn.functional.softmax(ranking_logits, dim=-1)[:, 1]
+                
+                pruning_logits = outputs["pruning_logits"]
+                pruning_probs = torch.nn.functional.softmax(pruning_logits, dim=-1)
+                keep_probs = pruning_probs[:, :, 1]  # Probability of keeping each token
+                
+                # Process each example in the batch
+                for i in range(len(batch)):
+                    query, document = batch[i]
+                    chunks = batch_chunks[i]
+                    tokens = self.tokenizer.convert_ids_to_tokens(input_ids[i])
+                    offsets = offset_mapping[i]
+                    
+                    # Find document boundaries using </s> token (eos_token_id)
+                    eos_token_id = self.tokenizer.eos_token_id or 2
+                    sep_positions = (input_ids[i] == eos_token_id).nonzero(as_tuple=True)[0]
+                    
+                    if len(sep_positions) >= 2:
+                        # Document starts after first </s> + <s>
+                        doc_start = sep_positions[0].item() + 2
+                        doc_end = sep_positions[1].item()
+                        
+                        # Get document tokens and their keep probabilities
+                        doc_keep_probs = keep_probs[i, doc_start:doc_end]
+                        doc_offsets = offsets[doc_start:doc_end]
+                        
+                        # Map chunks to token predictions
+                        chunk_scores, chunk_predictions = self._evaluate_chunks(
+                            chunks, doc_keep_probs, doc_offsets, 
+                            token_threshold, chunk_threshold
+                        )
+                        
+                        # Calculate compression ratio
+                        num_kept_chunks = chunk_predictions.sum()
+                        num_total_chunks = len(chunks)
+                        compression_ratio = 1.0 - (num_kept_chunks / num_total_chunks) if num_total_chunks > 0 else 0.0
+                        
+                        # Create output
+                        output = ProvenceContextOutput(
+                            ranking_scores=ranking_scores[i].cpu().item(),
+                            chunk_predictions=chunk_predictions,
+                            chunk_scores=chunk_scores,
+                            token_scores=doc_keep_probs.cpu().numpy(),
+                            chunk_positions=chunks,
+                            compression_ratio=compression_ratio
+                        )
+                        
+                        all_outputs.append(output)
+                    else:
+                        # Failed to find document boundaries
+                        output = ProvenceContextOutput(
+                            ranking_scores=ranking_scores[i].cpu().item(),
+                            chunk_predictions=np.array([]),
+                            chunk_scores=np.array([]),
+                            token_scores=np.array([]),
+                            chunk_positions=chunks,
+                            compression_ratio=0.0
+                        )
+                        all_outputs.append(output)
+        
+        return all_outputs[0] if single_input else all_outputs
+    
+    def _evaluate_chunks(
+        self,
+        chunks: List[Tuple[int, int]],
+        token_probs: torch.Tensor,
+        token_offsets: torch.Tensor,
+        token_threshold: float,
+        chunk_threshold: float
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Evaluate chunks based on token predictions.
+        
+        Args:
+            chunks: List of chunk positions [(start, end), ...]
+            token_probs: Token-level keep probabilities
+            token_offsets: Token offset mapping
+            token_threshold: Threshold for binary token classification
+            chunk_threshold: Minimum ratio for chunk classification
+            
+        Returns:
+            chunk_scores: Average probability for each chunk
+            chunk_predictions: Binary predictions for each chunk
+        """
+        chunk_scores = []
+        chunk_predictions = []
+        
+        for chunk_start, chunk_end in chunks:
+            # Find tokens that overlap with this chunk
+            overlapping_tokens = []
+            overlapping_probs = []
+            
+            for j, (token_start, token_end) in enumerate(token_offsets):
+                if token_start != 0 and token_end != 0:  # Skip special tokens
+                    # Check if token overlaps with chunk
+                    if token_start < chunk_end and token_end > chunk_start:
+                        overlapping_tokens.append(j)
+                        overlapping_probs.append(token_probs[j].item())
+            
+            if overlapping_probs:
+                # Calculate chunk-level score
+                chunk_score = np.mean(overlapping_probs)
+                
+                # Apply chunk-level threshold
+                # Count tokens above token_threshold
+                tokens_above_threshold = sum(1 for prob in overlapping_probs if prob > token_threshold)
+                ratio_above_threshold = tokens_above_threshold / len(overlapping_probs)
+                
+                # Chunk is predicted as relevant if enough tokens are above threshold
+                chunk_pred = 1 if ratio_above_threshold >= chunk_threshold else 0
+            else:
+                # No overlapping tokens found
+                chunk_score = 0.0
+                chunk_pred = 0
+            
+            chunk_scores.append(chunk_score)
+            chunk_predictions.append(chunk_pred)
+        
+        return np.array(chunk_scores), np.array(chunk_predictions)
     
     def prune(
         self,
