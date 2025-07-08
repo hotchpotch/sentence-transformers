@@ -22,29 +22,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def convert_dataset_format(hf_dataset):
-    """
-    HuggingFace データセットを Provence 学習形式に変換
-    """
-    converted_data = []
-    
-    for item in hf_dataset:
-        # teacher_scores のキー名を変更
-        teacher_scores = item['teacher_scores_japanese-reranker-xsmall-v2']
-        
-        converted_item = {
-            'query': item['query'],
-            'texts': item['texts'],
-            'chunks_pos': item['chunks_pos'],
-            'relevant_chunks': item['relevant_chunks'],
-            'ranking_labels': item['labels'],  # labels -> ranking_labels
-            'teacher_scores': teacher_scores,
-            'dataset_name': item['dataset_name'],
-            'id': item['id']
-        }
-        converted_data.append(converted_item)
-    
-    return converted_data
 
 def main():
     print("=== ja-minimal での Provence モデル学習 ===")
@@ -57,13 +34,8 @@ def main():
     print("📥 データセットロード中...")
     dataset = load_dataset('hotchpotch/wip-query-context-pruner-with-teacher-scores', 'ja-minimal')
     
-    # データ変換
-    print("🔄 データ形式変換中...")
-    train_data = convert_dataset_format(dataset['train'])
-    eval_data = convert_dataset_format(dataset['validation'])
-    
-    print(f"✅ 学習データ: {len(train_data):,} 件")
-    print(f"✅ 評価データ: {len(eval_data):,} 件")
+    print(f"✅ 学習データ: {len(dataset['train']):,} 件")
+    print(f"✅ 評価データ: {len(dataset['validation']):,} 件")
     
     # モデル初期化
     print("🤖 モデル初期化中...")
@@ -77,20 +49,27 @@ def main():
         }
     )
     
-    # データコレクター
+    # データコレクター（HuggingFace Datasetsをそのまま使用）
     data_collator = ProvenceChunkBasedDataCollator(
         tokenizer=model.tokenizer,
         max_length=512,
         padding=True,
-        truncation=True
+        truncation=True,
+        # 列名を指定
+        query_column="query",
+        texts_column="texts",
+        labels_column="labels",
+        scores_column="teacher_scores_japanese-reranker-xsmall-v2",  # Teacher scoresを使用
+        chunks_pos_column="chunks_pos",
+        relevant_chunks_column="relevant_chunks"
     )
     
-    # 損失関数（chunk-based専用）
+    # 損失関数（シンプル化）
     loss_fn = ProvenceChunkBasedLoss(
         model=model,
         ranking_weight=1.0,
         pruning_weight=0.8,  # プルーニング重視
-        use_teacher_scores=True
+        is_regression=True   # Teacher score distillation
     )
     
     # 学習設定（大容量GPU用）
@@ -116,15 +95,15 @@ def main():
     print("🚀 トレーナー初期化中...")
     trainer = ProvenceTrainer(
         model=model,
-        train_dataset=train_data,
-        eval_dataset=eval_data,
+        train_dataset=dataset['train'],  # HuggingFace Datasetをそのまま渡す
+        eval_dataset=dataset['validation'],
         data_collator=data_collator,
         loss_fn=loss_fn,
         training_args=training_args
     )
     
     # 学習開始
-    print(f"🎯 学習開始 - ja-minimal ({len(train_data):,} 件)")
+    print(f"🎯 学習開始 - ja-minimal ({len(dataset['train']):,} 件)")
     print(f"📁 出力先: {output_dir}")
     print(f"⚙️  設定: エポック数={training_args['num_epochs']}, バッチサイズ={training_args['batch_size']}, 実効BS={training_args['batch_size'] * training_args['gradient_accumulation_steps']}")
     

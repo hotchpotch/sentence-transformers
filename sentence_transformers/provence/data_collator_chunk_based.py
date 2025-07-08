@@ -7,6 +7,7 @@ import torch
 import numpy as np
 from dataclasses import dataclass
 import logging
+from datasets import Dataset
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,8 @@ class ProvenceChunkBasedDataCollator:
     - Tokens in relevant chunks (marked in relevant_chunks) get label 1
     - All other tokens get label 0
     - [CLS] and query tokens always get label 0
+    
+    This collator works directly with HuggingFace datasets without requiring conversion.
     """
     
     def __init__(self,
@@ -27,6 +30,14 @@ class ProvenceChunkBasedDataCollator:
                  max_length: int = 512,
                  padding: Union[bool, str] = True,
                  truncation: bool = True,
+                 query_column: str = "query",
+                 texts_column: str = "texts",
+                 labels_column: str = "labels",
+                 scores_column: Optional[str] = None,
+                 chunks_pos_column: str = "chunks_pos",
+                 relevant_chunks_column: str = "relevant_chunks",
+                 dataset_name_column: Optional[str] = "dataset_name",
+                 id_column: Optional[str] = "id",
                  mini_batch_size: Optional[int] = None):
         """
         Args:
@@ -34,6 +45,14 @@ class ProvenceChunkBasedDataCollator:
             max_length: Maximum sequence length
             padding: Padding strategy
             truncation: Whether to truncate sequences
+            query_column: Name of the query column in the dataset
+            texts_column: Name of the texts column in the dataset
+            labels_column: Name of the labels column in the dataset
+            scores_column: Name of the teacher scores column (if None, use labels_column)
+            chunks_pos_column: Name of the chunks positions column
+            relevant_chunks_column: Name of the relevant chunks column
+            dataset_name_column: Name of the dataset name column (optional)
+            id_column: Name of the ID column (optional)
             mini_batch_size: Size for processing mini-batches (if None, process all at once)
         """
         self.tokenizer = tokenizer
@@ -42,49 +61,120 @@ class ProvenceChunkBasedDataCollator:
         self.truncation = truncation
         self.mini_batch_size = mini_batch_size
         
-    def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, Any]:
+        # Column names
+        self.query_column = query_column
+        self.texts_column = texts_column
+        self.labels_column = labels_column
+        self.scores_column = scores_column
+        self.chunks_pos_column = chunks_pos_column
+        self.relevant_chunks_column = relevant_chunks_column
+        self.dataset_name_column = dataset_name_column
+        self.id_column = id_column
+        
+        # Column validation will be done when first batch is processed
+        self._validated = False
+        
+    def _validate_columns(self, dataset_or_batch):
+        """Validate that required columns exist in the dataset."""
+        if self._validated:
+            return
+            
+        # Get column names from either a Dataset or a batch dict
+        if isinstance(dataset_or_batch, Dataset):
+            columns = dataset_or_batch.column_names
+        elif isinstance(dataset_or_batch, dict):
+            columns = dataset_or_batch.keys()
+        elif isinstance(dataset_or_batch, list) and len(dataset_or_batch) > 0:
+            columns = dataset_or_batch[0].keys()
+        else:
+            return  # Can't validate yet
+        
+        # Check required columns
+        required_columns = [
+            self.query_column,
+            self.texts_column,
+            self.labels_column,
+            self.chunks_pos_column,
+            self.relevant_chunks_column
+        ]
+        
+        missing_columns = []
+        for col in required_columns:
+            if col not in columns:
+                missing_columns.append(col)
+                
+        if missing_columns:
+            raise ValueError(
+                f"Missing required columns: {missing_columns}. "
+                f"Available columns: {list(columns)}"
+            )
+        
+        # Check optional columns
+        if self.scores_column and self.scores_column not in columns:
+            logger.warning(
+                f"Teacher scores column '{self.scores_column}' not found. "
+                f"Using '{self.labels_column}' for ranking targets."
+            )
+            self.scores_column = None
+            
+        self._validated = True
+        
+    def __call__(self, features: Union[List[Dict[str, Any]], Dataset]) -> Dict[str, Any]:
         """
         Collate batch of examples for training.
         
         Args:
-            features: List of examples, each containing:
-                - 'query': Query text
-                - 'texts': List of document texts
-                - 'ranking_labels': List of relevance labels (0/1)
-                - 'teacher_scores': List of teacher scores for distillation
-                - 'chunks_pos': List of chunk boundaries for each text
-                - 'relevant_chunks': List of relevant chunk indices for each text
+            features: Either a list of dicts or a Dataset batch containing required columns
                 
         Returns:
             Batch dictionary compatible with ProvenceLoss
         """
+        # Validate columns on first call
+        self._validate_columns(features)
+        
+        # Handle both list of dicts and Dataset batch
+        if isinstance(features, Dataset):
+            # Convert Dataset batch to list of dicts
+            batch_size = len(features)
+            features_list = []
+            for i in range(batch_size):
+                features_list.append({
+                    col: features[col][i] for col in features.column_names
+                })
+            features = features_list
+        
         batch_size = len(features)
         
-        # Extract queries and texts lists
-        queries = [f['query'] for f in features]
-        texts_lists = [f['texts'] for f in features]
-        ranking_labels_lists = [f['ranking_labels'] for f in features]
-        chunks_pos_lists = [f['chunks_pos'] for f in features]
-        relevant_chunks_lists = [f['relevant_chunks'] for f in features]
-        
-        # Create all query-text pairs
+        # Create all query-text pairs using column names
         pairs = []
         batch_indices = []
         doc_indices = []
         pair_ranking_labels = []
+        pair_ranking_targets = []  # Can be labels or teacher scores
         pair_chunks_pos = []
         pair_relevant_chunks = []
         
-        for batch_idx, (query, texts, labels, chunks_pos, relevant_chunks) in enumerate(
-            zip(queries, texts_lists, ranking_labels_lists, chunks_pos_lists, relevant_chunks_lists)
-        ):
-            for doc_idx, (text, label, chunk_pos, rel_chunks) in enumerate(
-                zip(texts, labels, chunks_pos, relevant_chunks)
+        for batch_idx, feature in enumerate(features):
+            query = feature[self.query_column]
+            texts = feature[self.texts_column]
+            labels = feature[self.labels_column]
+            chunks_pos = feature[self.chunks_pos_column]
+            relevant_chunks = feature[self.relevant_chunks_column]
+            
+            # Get ranking targets (teacher scores or labels)
+            if self.scores_column and self.scores_column in feature:
+                ranking_targets = feature[self.scores_column]
+            else:
+                ranking_targets = labels
+            
+            for doc_idx, (text, label, target, chunk_pos, rel_chunks) in enumerate(
+                zip(texts, labels, ranking_targets, chunks_pos, relevant_chunks)
             ):
                 pairs.append([query, text])
                 batch_indices.append(batch_idx)
                 doc_indices.append(doc_idx)
                 pair_ranking_labels.append(label)
+                pair_ranking_targets.append(target)
                 pair_chunks_pos.append(chunk_pos)
                 pair_relevant_chunks.append(rel_chunks)
         
@@ -135,45 +225,38 @@ class ProvenceChunkBasedDataCollator:
         )
         
         # Prepare labels in the format expected by ProvenceLoss
-        max_docs = max(len(texts) for texts in texts_lists)
+        max_docs = max(len(feature[self.texts_column]) for feature in features)
         
-        # Ranking labels matrix
-        ranking_labels_matrix = torch.full(
-            (batch_size, max_docs), 
+        # Ranking targets matrix (can be labels or teacher scores)
+        ranking_targets_matrix = torch.full(
+            (batch_size, max_docs),
             fill_value=-100,  # Padding value
             dtype=torch.float32
         )
         
-        # Teacher scores matrix
-        teacher_scores_matrix = torch.full(
-            (batch_size, max_docs),
-            fill_value=0.0,
-            dtype=torch.float32
-        )
-        
-        # Fill matrices
-        for i, f in enumerate(features):
-            num_docs = len(f['texts'])
+        # Fill matrix
+        for i, feature in enumerate(features):
+            texts = feature[self.texts_column]
+            num_docs = len(texts)
             
-            # Fill ranking labels
-            ranking_labels_matrix[i, :num_docs] = torch.tensor(
-                f['ranking_labels'], dtype=torch.float32
+            # Get targets (teacher scores or labels)
+            if self.scores_column and self.scores_column in feature:
+                targets = feature[self.scores_column]
+            else:
+                targets = feature[self.labels_column]
+            
+            # Fill ranking targets
+            ranking_targets_matrix[i, :num_docs] = torch.tensor(
+                targets, dtype=torch.float32
             )
-            
-            # Fill teacher scores
-            if 'teacher_scores' in f:
-                teacher_scores_matrix[i, :num_docs] = torch.tensor(
-                    f['teacher_scores'], dtype=torch.float32
-                )
         
         # Prepare output format compatible with ProvenceLoss
         labels = {
-            'ranking_labels': ranking_labels_matrix,
-            'teacher_scores': teacher_scores_matrix,
+            'ranking_targets': ranking_targets_matrix,  # Single target matrix
             'pruning_labels': pruning_labels,
             'batch_indices': torch.tensor(batch_indices),
             'doc_indices': torch.tensor(doc_indices),
-            'docs_per_query': [len(texts) for texts in texts_lists]
+            'docs_per_query': [len(feature[self.texts_column]) for feature in features]
         }
         
         # Return in the format expected by ProvenceLoss
@@ -219,15 +302,17 @@ class ProvenceChunkBasedDataCollator:
             query, document = pair
             
             # Find where the document starts in the tokenized sequence
-            # For XLMRoberta: <s> query </s> </s> document </s>
+            # For XLMRoberta: <s> query </s> <s> document </s>
             token_ids = encoded_inputs['input_ids'][idx]
-            sep_token_id = self.tokenizer.sep_token_id
-            sep_positions = (token_ids == sep_token_id).nonzero(as_tuple=True)[0]
             
-            if len(sep_positions) >= 3:
-                # Document starts after second </s>
-                doc_start_token = sep_positions[1].item() + 1
-                doc_end_token = sep_positions[2].item()
+            # Use EOS token ID for XLMRoberta
+            eos_token_id = self.tokenizer.eos_token_id or 2  # XLMRoberta uses ID 2 for </s>
+            sep_positions = (token_ids == eos_token_id).nonzero(as_tuple=True)[0]
+            
+            if len(sep_positions) >= 2:
+                # Document starts after first </s> + <s>
+                doc_start_token = sep_positions[0].item() + 2  # Skip </s> and <s>
+                doc_end_token = sep_positions[1].item()
                 
                 # For each token in the document range
                 for token_idx in range(doc_start_token, doc_end_token):

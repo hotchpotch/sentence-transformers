@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-ja-small データセットでの Provence モデル学習スクリプト
+ja-full データセットでの Provence モデル学習スクリプト
+大規模データセットのため1エポックのみ実行
 """
 
 import os
@@ -24,15 +25,15 @@ logger = logging.getLogger(__name__)
 
 
 def main():
-    print("=== ja-small での Provence モデル学習 ===")
+    print("=== ja-full での Provence モデル学習 ===")
     
     # 出力ディレクトリ
-    output_dir = "./outputs/provence-ja-small"
+    output_dir = "./outputs/provence-ja-full"
     os.makedirs(output_dir, exist_ok=True)
     
     # データセットロード
     print("📥 データセットロード中...")
-    dataset = load_dataset('hotchpotch/wip-query-context-pruner-with-teacher-scores', 'ja-small')
+    dataset = load_dataset('hotchpotch/wip-query-context-pruner-with-teacher-scores', 'ja-full')
     
     print(f"✅ 学習データ: {len(dataset['train']):,} 件")
     print(f"✅ 評価データ: {len(dataset['validation']):,} 件")
@@ -72,20 +73,20 @@ def main():
         is_regression=True   # Teacher score distillation
     )
     
-    # 学習設定（ja-small用）
+    # 学習設定（ja-full用 - 大規模データセット）
     training_args = {
         "output_dir": output_dir,
-        "num_epochs": 3,  # ja-smallは大きいので少なめに
-        "batch_size": 32,  # ja-smallは大きいので少し控えめに
+        "num_epochs": 1,  # 大規模なので1エポックのみ
+        "batch_size": 24,  # メモリ使用量を考慮して少し控えめ
         "learning_rate": 2e-5,
-        "warmup_ratio": 0.1,
+        "warmup_ratio": 0.05,  # ja-fullは大きいので少なめのwarmup
         "weight_decay": 0.01,
-        "gradient_accumulation_steps": 1,
+        "gradient_accumulation_steps": 2,  # 実効バッチサイズ48
         "max_grad_norm": 1.0,
-        "logging_steps": 50,  # より頻繁にログ出力
-        "eval_steps": 500,   # 評価間隔
-        "save_steps": 500,   # 保存間隔
-        "save_total_limit": 2,  # ディスク容量考慮
+        "logging_steps": 100,  # より頻繁にログ出力
+        "eval_steps": 1000,   # 評価間隔
+        "save_steps": 1000,   # 保存間隔
+        "save_total_limit": 3,  # ディスク容量考慮
         "fp16": True,
         "dataloader_num_workers": 4,
         "seed": 42
@@ -103,9 +104,10 @@ def main():
     )
     
     # 学習開始
-    print(f"🎯 学習開始 - ja-small ({len(dataset['train']):,} 件)")
+    print(f"🎯 学習開始 - ja-full ({len(dataset['train']):,} 件)")
     print(f"📁 出力先: {output_dir}")
     print(f"⚙️  設定: エポック数={training_args['num_epochs']}, バッチサイズ={training_args['batch_size']}, 実効BS={training_args['batch_size'] * training_args['gradient_accumulation_steps']}")
+    print(f"📊 推定ステップ数: {len(dataset['train']) // (training_args['batch_size'] * training_args['gradient_accumulation_steps'])}")
     
     try:
         trainer.train()

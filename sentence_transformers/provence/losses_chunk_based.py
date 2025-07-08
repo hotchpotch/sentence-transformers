@@ -19,6 +19,9 @@ class ProvenceChunkBasedLoss(nn.Module):
     - Flattened query-text pairs from the data collator
     - Reconstruction of batch structure for ranking loss
     - Token-level pruning loss
+    
+    The DataCollator determines whether to use teacher scores or hard labels
+    by setting the appropriate scores_column parameter.
     """
     
     def __init__(self,
@@ -27,25 +30,25 @@ class ProvenceChunkBasedLoss(nn.Module):
                  pruning_loss_fn: Optional[nn.Module] = None,
                  ranking_weight: float = 1.0,
                  pruning_weight: float = 0.5,
-                 use_teacher_scores: bool = False):
+                 is_regression: bool = True):
         """
         Args:
             model: ProvenceEncoder model
-            ranking_loss_fn: Loss function for ranking (default: MSELoss for teacher scores)
+            ranking_loss_fn: Loss function for ranking (default: MSELoss for regression, BCEWithLogitsLoss for classification)
             pruning_loss_fn: Loss function for pruning (default: CrossEntropyLoss)
             ranking_weight: Weight for ranking loss
             pruning_weight: Weight for pruning loss
-            use_teacher_scores: Whether to use teacher scores for distillation
+            is_regression: Whether the ranking task is regression (True) or classification (False)
         """
         super().__init__()
         
         self.model = model
         self.ranking_weight = ranking_weight
         self.pruning_weight = pruning_weight
-        self.use_teacher_scores = use_teacher_scores
+        self.is_regression = is_regression
         
         # Loss functions
-        if self.use_teacher_scores:
+        if is_regression:
             self.ranking_loss_fn = ranking_loss_fn or nn.MSELoss()
         else:
             self.ranking_loss_fn = ranking_loss_fn or nn.BCEWithLogitsLoss()
@@ -59,8 +62,7 @@ class ProvenceChunkBasedLoss(nn.Module):
         Args:
             sentence_features: List with single dict containing flattened tokenized inputs
             labels: Dictionary containing:
-                - 'ranking_labels': [batch_size, max_docs] matrix format
-                - 'teacher_scores': [batch_size, max_docs] matrix format  
+                - 'ranking_targets': [batch_size, max_docs] matrix of targets (teacher scores or labels)
                 - 'pruning_labels': [num_pairs, seq_len] flattened format
                 - 'batch_indices': [num_pairs] mapping to original batch
                 - 'doc_indices': [num_pairs] mapping to document index
@@ -112,13 +114,9 @@ class ProvenceChunkBasedLoss(nn.Module):
         # Get reconstruction info
         batch_indices = labels['batch_indices']  # [num_pairs]
         doc_indices = labels['doc_indices']      # [num_pairs]
-        docs_per_query = labels['docs_per_query'] # List[int]
         
-        # Target labels/scores
-        if self.use_teacher_scores and 'teacher_scores' in labels:
-            target_matrix = labels['teacher_scores']  # [batch_size, max_docs]
-        else:
-            target_matrix = labels['ranking_labels']  # [batch_size, max_docs]
+        # Target values (either teacher scores or hard labels, determined by DataCollator)
+        target_matrix = labels['ranking_targets']  # [batch_size, max_docs]
         
         # Extract target values for each pair
         target_values = []
@@ -144,8 +142,8 @@ class ProvenceChunkBasedLoss(nn.Module):
             return None
         
         # Compute loss
-        if self.use_teacher_scores:
-            # Teacher score distillation with sigmoid activation
+        if self.is_regression:
+            # Regression with sigmoid activation (for teacher score distillation)
             ranking_probs = torch.sigmoid(ranking_logits)
             loss = self.ranking_loss_fn(ranking_probs, target_tensor)
         else:
