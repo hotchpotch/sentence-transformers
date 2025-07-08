@@ -181,12 +181,12 @@ def main():
     print("🤖 モデル初期化中...")
     model = ProvenceEncoder(
         model_name_or_path=args.model_name,
+        num_labels=1,
         max_length=args.max_length,
         pruning_config={
             'num_labels': 2,
-            'classifier_dropout': 0.1,
-            'sentence_pooling': 'mean',
-            'use_weighted_pooling': False,
+            'dropout': 0.1,
+            'sentence_pooling': 'mean'
         }
     )
     
@@ -209,8 +209,11 @@ def main():
     # データコレーターの初期化
     data_collator = ProvenceDataCollator(
         tokenizer=model.tokenizer,
+        max_length=args.max_length,
+        padding=True,
+        truncation=True,
         query_column="query",
-        texts_column="texts",
+        texts_column="texts", 
         labels_column="labels",
         scores_column="teacher_scores_japanese-reranker-xsmall-v2",
         chunks_pos_column="chunks_pos",
