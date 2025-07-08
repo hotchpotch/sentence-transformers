@@ -40,11 +40,11 @@ uv run python tmp/sample.py   # tmpディレクトリのサンプルコード実
 2. **models/**: モジュラーなコンポーネント（Transformer、Pooling、Dense等）をパイプライン形式で組み合わせ
 3. **losses/**: 20以上の損失関数（MSE、Triplet、Contrastive等）
 4. **evaluation/**: 各種評価メトリクス
-5. **cross_encoder/**: リランカー実装（Provenceアプローチとの統合予定）
+5. **cross_encoder/**: リランカー実装（Pruningアプローチとの統合予定）
 
-### Provenceアプローチの実装状況
+### Pruningアプローチの実装状況
 
-`@docs-text-pruner/provence/provence_paper.md`に基づく実装：
+`@docs-text-pruner/provence/provence_paper.md`（Provence論文）に基づく実装：
 
 1. **目的**: RAGパイプラインでquery依存のcontext pruningを実現
 2. **特徴**:
@@ -54,20 +54,19 @@ uv run python tmp/sample.py   # tmpディレクトリのサンプルコード実
    - hotchpotch/japanese-reranker-xsmall-v2ベースで実装
 
 3. **実装済みコンポーネント**:
-   - `sentence_transformers/provence/` - Provence実装
-     - `encoder.py` - ProvenceEncoderクラス（メインクラス）
-     - `losses.py` - ProvenceLoss（統合損失関数）
-     - `losses_batched.py` - バッチ対応損失（Hard Negative学習）
-     - `losses_chunk_based.py` - チャンクベース損失関数
-     - `trainer.py` - ProvenceTrainer
-     - `data_structures.py` - ProvenceContextOutput等のデータ構造
+   - `sentence_transformers/pruning/` - Pruning実装（旧provence/）
+     - `encoder.py` - PruningEncoderクラス（メインクラス、将来的にpruning-onlyモードも対応予定）
+     - `losses.py` - PruningLoss（統合損失関数）
+     - `trainer.py` - PruningTrainer
+     - `data_structures.py` - RerankingPruningOutput、PruningOutput等のデータ構造
+     - `models/pruning_head.py` - PruningHead（プルーニング用ヘッド）
    - `scripts/` - 学習・評価スクリプト群
-     - `train_ja_minimal.py` - ja-minimalデータセット学習
-     - `train_ja_small.py` - ja-smallデータセット学習
-     - `train_ja_full.py` - ja-fullデータセット学習
-     - `evaluate_chunk_based.py` - チャンクベース評価
-     - `analyze_pos_neg_separately.py` - POS/NEG分離分析
-   - 3つのモデルを学習済み（minimal, small, full）
+     - `train_pruning.py` - 統合学習スクリプト（minimal/small/full対応）
+     - `evaluate_pruning.py` - 統合評価スクリプト
+   - 学習済みモデル:
+     - minimal: 2エポック完了（F2=0.832、圧縮率48.4%）
+     - small: 1.46エポック完了（F2=0.882、圧縮率53.1%）※2エポックで十分と判明
+     - full: 最終的な性能（F2=0.862、圧縮率44.8%）
 
 ### 参考ドキュメント
 
@@ -106,7 +105,7 @@ uv run python tmp/sample.py   # tmpディレクトリのサンプルコード実
 5. サンプルコードとドキュメントの作成 ✅
 
 #### 実装済み機能
-- ProvenceEncoder: デュアルヘッド（ランキング＋プルーニング）アーキテクチャ
+- PruningEncoder: デュアルヘッド（ランキング＋プルーニング）アーキテクチャ
 - バッチ学習: Hard Negative学習による効率的な学習
 - 多言語対応: 日本語・英語の文分割機能
 - 教師蒸留: 既存リランカーからの知識蒸留
@@ -149,6 +148,6 @@ git diff --name-only --diff-filter=A master...text-pruner
 この差分を追跡することで：
 - OSS本体の実装パターン
 - 今回の拡張による変更点
-- 新規追加されたProvence関連機能
+- 新規追加されたPruning関連機能
 
 を理解できます。

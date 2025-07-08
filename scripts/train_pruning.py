@@ -64,7 +64,7 @@ TRAINING_CONFIGS = {
         'seed': 42
     },
     'small': {
-        'num_epochs': 3,
+        'num_epochs': 2,  # 1.5エポックで十分と判明
         'batch_size': 32,
         'learning_rate': 2e-5,
         'warmup_ratio': 0.1,
