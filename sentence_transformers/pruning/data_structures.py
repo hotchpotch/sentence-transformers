@@ -41,6 +41,32 @@ class PruningOutput:
 
 
 @dataclass
+class PruningOnlyOutput:
+    """
+    Output dataclass for pruning-only mode (no ranking).
+    
+    Attributes:
+        pruning_logits: Raw pruning logits from the model [batch_size, seq_len, 2]
+        pruning_mask: Binary mask for token-level pruning [batch_size, seq_len]
+        hidden_states: Hidden states from the encoder (optional)
+    """
+    pruning_logits: torch.Tensor
+    pruning_mask: Optional[torch.Tensor] = None
+    hidden_states: Optional[torch.Tensor] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary format for serialization."""
+        result = {}
+        for key, value in self.__dict__.items():
+            if value is not None:
+                if isinstance(value, (np.ndarray, torch.Tensor)):
+                    result[key] = value.tolist()
+                else:
+                    result[key] = value
+        return result
+
+
+@dataclass
 class RerankingPruningOutput:
     """
     Output dataclass containing both reranking and pruning results.

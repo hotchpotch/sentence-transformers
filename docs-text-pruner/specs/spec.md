@@ -6,10 +6,16 @@
 - 2025-01-07: Provence実装完了、バッチ学習アプローチ確立
 - 2025-01-08: トークンレベルプルーニング実装完了、ja-minimal評価済み
 - 2025-01-08: チャンクベース評価システム実装、3モデル（minimal, small, full）学習完了
+- 2025-01-09: Provence → Pruning リネーム、pruning-onlyモード実装
 
 ## 概要
 
 Sentence TransformersにProvence論文ベースのtext-pruner機能を実装する。query-dependentな文書プルーニングとrerankingを統合した効率的なRAGパイプラインを実現。既存のCrossEncoderアーキテクチャを拡張し、OSSコミュニティへのPR/マージを目標とする。
+
+### 動作モード
+
+1. **reranking_pruning** (デフォルト): ランキングとプルーニングの両方を行う統合モード
+2. **pruning_only**: プルーニングのみを行う軽量モード（`cl-nagoya/ruri-v3-30m`等の小型モデルに最適）
 
 ## 実装ステータス
 
@@ -23,8 +29,9 @@ Sentence TransformersにProvence論文ベースのtext-pruner機能を実装す�
 - [x] 評価メトリクス実装（圧縮率、ランキング性能）
 - [x] 学習・評価スクリプト作成（minimal, small, full対応）
 - [x] 閾値最適化（F2スコアベース）
+- [x] pruning-onlyモード実装（軽量モデル対応）
+- [x] 包括的なモードテスト実装
 - [ ] ドキュメント作成（API仕様等）
-- [ ] テスト実装
 - [ ] PR作成
 
 ## 現在の実装成果
@@ -58,6 +65,7 @@ Sentence TransformersにProvence論文ベースのtext-pruner機能を実装す�
 - F2最適化: Recall重視で誤削除（FN）を最小化
 - 多段階閾値: トークンレベルとチャンクレベルの2段階制御
 - POS/NEG分離評価: 関連/非関連文書で異なる最適化戦略
+- マルチモード対応: reranking_pruning/pruning_onlyの選択可能
 
 ## アーキテクチャ設計
 
@@ -82,22 +90,26 @@ Sentence TransformersにProvence論文ベースのtext-pruner機能を実装す�
 
 ```
 sentence_transformers/
-├── provence/                    # Provence実装（実装済み）
+├── pruning/                     # Pruning実装（旧provence/、実装済み）
 │   ├── __init__.py
-│   ├── encoder.py              # ProvenceEncoderクラス（トークンレベル対応）
-│   ├── losses_chunk_based.py   # チャンクベース損失関数
-│   ├── data_collator_chunk_based.py # ダイナミックラベル生成
-│   ├── trainer.py              # ProvenceTrainer
-│   ├── data_structures.py      # データ構造定義
+│   ├── encoder.py              # PruningEncoderクラス（マルチモード対応）
+│   ├── losses.py               # PruningLoss（モード対応）
+│   ├── data_collator.py        # PruningDataCollator（モード対応）
+│   ├── trainer.py              # PruningTrainer
+│   ├── data_structures.py      # データ構造定義（PruningOnlyOutput追加）
 │   └── models/
 │       └── pruning_head.py     # プルーニングヘッド実装
 ├── utils/
 │   └── text_chunking.py        # 言語別文分割（実装済み）
 
 scripts/                         # 学習・評価スクリプト（実装済み）
-├── train_ja_minimal.py         # ja-minimal学習
-├── evaluate_ja_minimal.py      # ja-minimal評価
-└── check_ja_dataset.py         # データセット確認
+├── train_pruning.py            # 統合学習スクリプト（全サイズ対応）
+├── evaluate_pruning.py         # 統合評価スクリプト
+├── train_pruning_only.py       # pruning-onlyモード学習
+└── test_pruning_modes.py       # モード別動作確認テスト
+
+tests/pruning/                   # テスト（実装済み）
+└── test_pruning_modes.py       # 包括的なモードテスト
 ```
 
 **実装アプローチ**：
@@ -934,3 +946,111 @@ model = CrossEncoder(
 1. この仕様書のレビューと改善（2回以上）
 2. Phase 1の実装開始
 3. 定期的な進捗確認とフィードバック
+
+## API使用例
+
+### 1. Reranking + Pruning モード（デフォルト）
+
+```python
+from sentence_transformers.pruning import PruningEncoder
+
+# モデルの初期化
+model = PruningEncoder(
+    model_name_or_path="hotchpotch/japanese-reranker-xsmall-v2",
+    mode="reranking_pruning",  # デフォルト
+    max_length=512
+)
+
+# 推論（ランキングスコアのみ）
+query = "東京の観光地について教えて"
+documents = ["東京タワーは...", "スカイツリーは..."]
+scores = model.predict([(query, doc) for doc in documents])
+
+# 推論（プルーニング付き）
+outputs = model.predict(
+    [(query, doc) for doc in documents],
+    apply_pruning=True,
+    pruning_threshold=0.5,
+    return_documents=True
+)
+for out in outputs:
+    print(f"Score: {out.ranking_scores}")
+    print(f"Compression: {out.compression_ratio:.1%}")
+    print(f"Pruned: {out.pruned_documents[0]}")
+```
+
+### 2. Pruning-Only モード（軽量版）
+
+```python
+from sentence_transformers.pruning import PruningEncoder
+
+# 軽量モデルで初期化
+model = PruningEncoder(
+    model_name_or_path="cl-nagoya/ruri-v3-30m",
+    mode="pruning_only",
+    pruning_config={
+        "hidden_size": 256,  # モデルに合わせて調整
+        "dropout": 0.1
+    }
+)
+
+# テキストのプルーニング
+queries = ["東京の観光地", "大阪の名物"]
+texts = ["東京タワーは333mの高さを誇る...", "たこ焼きは大阪の..."]
+
+results = model.prune_texts(
+    queries=queries,
+    texts=texts,
+    threshold=0.5,
+    batch_size=32
+)
+
+for r in results:
+    print(f"Kept: {r[\"kept_ratio\"]:.1%}")
+    print(f"Pruned text: {r[\"pruned_text\"]}")
+```
+
+### 3. データセット要件
+
+#### Reranking + Pruning モード
+```python
+dataset = {
+    "query": ["質問1", "質問2", ...],
+    "texts": [["文書1", "文書2", ...], ...],
+    "labels": [[1, 0, ...], ...],  # ランキングラベル
+    "chunks_pos": [[[start, end], ...], ...],
+    "relevant_chunks": [[0, 2, 5], ...]  # 関連チャンクのインデックス
+}
+```
+
+#### Pruning-Only モード
+```python
+dataset = {
+    "query": ["質問1", "質問2", ...],
+    "texts": [["文書1", "文書2", ...], ...],
+    # labelsは不要
+    "chunks_pos": [[[start, end], ...], ...],
+    "relevant_chunks": [[0, 2, 5], ...]
+}
+```
+
+### 4. 学習例
+
+```python
+from sentence_transformers.pruning import PruningTrainer, PruningDataCollator, PruningLoss
+
+# データコレーターと損失関数はモードを自動判定
+trainer = PruningTrainer(
+    model=model,
+    train_dataset=train_dataset,
+    eval_dataset=eval_dataset,
+    training_args={
+        "num_epochs": 2,
+        "batch_size": 32,
+        "learning_rate": 2e-5
+    }
+)
+
+trainer.train()
+```
+

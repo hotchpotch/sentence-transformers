@@ -26,6 +26,7 @@ class PruningLoss(nn.Module):
     
     def __init__(self,
                  model,
+                 mode: Optional[str] = None,
                  ranking_loss_fn: Optional[nn.Module] = None,
                  pruning_loss_fn: Optional[nn.Module] = None,
                  ranking_weight: float = 1.0,
@@ -34,6 +35,7 @@ class PruningLoss(nn.Module):
         """
         Args:
             model: PruningEncoder model
+            mode: Operating mode - "reranking_pruning" or "pruning_only" (if None, uses model.mode)
             ranking_loss_fn: Loss function for ranking (default: MSELoss for regression, BCEWithLogitsLoss for classification)
             pruning_loss_fn: Loss function for pruning (default: CrossEntropyLoss)
             ranking_weight: Weight for ranking loss
@@ -43,9 +45,17 @@ class PruningLoss(nn.Module):
         super().__init__()
         
         self.model = model
+        self.mode = mode or model.mode
         self.ranking_weight = ranking_weight
         self.pruning_weight = pruning_weight
         self.is_regression = is_regression
+        
+        # Validate mode
+        if self.mode not in ["reranking_pruning", "pruning_only"]:
+            raise ValueError(
+                f"Invalid mode: {self.mode}. "
+                f"Must be 'reranking_pruning' or 'pruning_only'"
+            )
         
         # Loss functions
         if is_regression:
@@ -83,19 +93,32 @@ class PruningLoss(nn.Module):
         total_loss = 0.0
         losses = {}
         
-        # 1. Ranking loss
-        if 'ranking_logits' in outputs:
-            ranking_loss = self._compute_ranking_loss(outputs, labels)
-            if ranking_loss is not None:
-                total_loss += self.ranking_weight * ranking_loss
-                losses['ranking_loss'] = ranking_loss
+        # 1. Ranking loss (only for reranking_pruning mode)
+        if self.mode == "reranking_pruning":
+            if 'ranking_logits' in outputs and 'ranking_targets' in labels:
+                ranking_loss = self._compute_ranking_loss(outputs, labels)
+                if ranking_loss is not None:
+                    total_loss += self.ranking_weight * ranking_loss
+                    losses['ranking_loss'] = ranking_loss
+            elif 'ranking_targets' in labels:
+                raise ValueError(
+                    f"Model in {self.mode} mode did not output ranking_logits but ranking_targets were provided"
+                )
         
-        # 2. Pruning loss
+        # 2. Pruning loss (for both modes)
         if 'pruning_logits' in outputs and 'pruning_labels' in labels:
             pruning_loss = self._compute_pruning_loss(outputs, labels)
             if pruning_loss is not None:
                 total_loss += self.pruning_weight * pruning_loss
                 losses['pruning_loss'] = pruning_loss
+        else:
+            raise ValueError(
+                "Pruning logits or labels missing. "
+                "pruning_logits in outputs: {} pruning_labels in labels: {}".format(
+                    'pruning_logits' in outputs,
+                    'pruning_labels' in labels
+                )
+            )
         
         # Log loss components
         if logger.isEnabledFor(logging.DEBUG):
@@ -105,6 +128,10 @@ class PruningLoss(nn.Module):
     
     def _compute_ranking_loss(self, outputs: Dict[str, torch.Tensor], labels: Dict[str, torch.Tensor]):
         """Compute ranking loss from flattened outputs and matrix labels."""
+        if self.mode == "pruning_only":
+            # Should not be called in pruning_only mode
+            return None
+            
         ranking_logits = outputs['ranking_logits']  # [num_pairs]
         
         # Ensure ranking_logits is 1D

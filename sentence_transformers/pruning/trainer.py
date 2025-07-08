@@ -78,11 +78,12 @@ class PruningTrainer:
         
         # Data collator
         if data_collator is None:
-            data_collator = ProvenceDataCollator(
+            data_collator = PruningDataCollator(
                 tokenizer=model.tokenizer,
                 max_length=model.max_length,
                 padding=True,
-                truncation=True
+                truncation=True,
+                mode=model.mode  # Pass model's mode to data collator
             )
         self.data_collator = data_collator
         
@@ -90,6 +91,7 @@ class PruningTrainer:
         if loss_fn is None:
             loss_fn = PruningLoss(
                 model=model,
+                mode=model.mode,  # Pass model's mode to loss function
                 ranking_weight=1.0,
                 pruning_weight=0.5,
                 is_regression=True  # Default to regression for teacher score distillation

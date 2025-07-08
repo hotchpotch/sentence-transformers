@@ -30,6 +30,7 @@ class PruningDataCollator:
                  max_length: int = 512,
                  padding: Union[bool, str] = True,
                  truncation: bool = True,
+                 mode: str = "reranking_pruning",
                  query_column: str = "query",
                  texts_column: str = "texts",
                  labels_column: str = "labels",
@@ -45,6 +46,7 @@ class PruningDataCollator:
             max_length: Maximum sequence length
             padding: Padding strategy
             truncation: Whether to truncate sequences
+            mode: Operating mode - "reranking_pruning" or "pruning_only"
             query_column: Name of the query column in the dataset
             texts_column: Name of the texts column in the dataset
             labels_column: Name of the labels column in the dataset
@@ -55,10 +57,18 @@ class PruningDataCollator:
             id_column: Name of the ID column (optional)
             mini_batch_size: Size for processing mini-batches (if None, process all at once)
         """
+        # Validate mode
+        if mode not in ["reranking_pruning", "pruning_only"]:
+            raise ValueError(
+                f"Invalid mode: {mode}. "
+                f"Must be 'reranking_pruning' or 'pruning_only'"
+            )
+        
         self.tokenizer = tokenizer
         self.max_length = max_length
         self.padding = padding
         self.truncation = truncation
+        self.mode = mode
         self.mini_batch_size = mini_batch_size
         
         # Column names
@@ -71,8 +81,29 @@ class PruningDataCollator:
         self.dataset_name_column = dataset_name_column
         self.id_column = id_column
         
+        # Define required columns based on mode
+        self._define_required_columns()
+        
         # Column validation will be done when first batch is processed
         self._validated = False
+        
+    def _define_required_columns(self):
+        """Define required columns based on mode"""
+        self.required_columns = {
+            "reranking_pruning": [
+                self.query_column,
+                self.texts_column,
+                self.labels_column,
+                self.chunks_pos_column,
+                self.relevant_chunks_column
+            ],
+            "pruning_only": [
+                self.query_column,
+                self.texts_column,
+                self.chunks_pos_column,
+                self.relevant_chunks_column
+            ]
+        }
         
     def _validate_columns(self, dataset_or_batch):
         """Validate that required columns exist in the dataset."""
@@ -89,14 +120,8 @@ class PruningDataCollator:
         else:
             return  # Can't validate yet
         
-        # Check required columns
-        required_columns = [
-            self.query_column,
-            self.texts_column,
-            self.labels_column,
-            self.chunks_pos_column,
-            self.relevant_chunks_column
-        ]
+        # Check required columns based on mode
+        required_columns = self.required_columns[self.mode]
         
         missing_columns = []
         for col in required_columns:
@@ -105,17 +130,26 @@ class PruningDataCollator:
                 
         if missing_columns:
             raise ValueError(
-                f"Missing required columns: {missing_columns}. "
-                f"Available columns: {list(columns)}"
+                f"Missing required columns for mode '{self.mode}': {missing_columns}. "
+                f"Available columns: {list(columns)}\n"
+                f"Required columns for {self.mode}: {required_columns}"
             )
         
-        # Check optional columns
-        if self.scores_column and self.scores_column not in columns:
-            logger.warning(
-                f"Teacher scores column '{self.scores_column}' not found. "
-                f"Using '{self.labels_column}' for ranking targets."
-            )
-            self.scores_column = None
+        # Mode-specific validations
+        if self.mode == "reranking_pruning":
+            # Check optional columns
+            if self.scores_column and self.scores_column not in columns:
+                logger.warning(
+                    f"Teacher scores column '{self.scores_column}' not found. "
+                    f"Using '{self.labels_column}' for ranking targets."
+                )
+                self.scores_column = None
+        elif self.mode == "pruning_only":
+            # Log if labels column is present but will be ignored
+            if self.labels_column in columns:
+                logger.info(
+                    f"Note: '{self.labels_column}' column found but will be ignored in pruning_only mode"
+                )
             
         self._validated = True
         
@@ -157,15 +191,21 @@ class PruningDataCollator:
         for batch_idx, feature in enumerate(features):
             query = feature[self.query_column]
             texts = feature[self.texts_column]
-            labels = feature[self.labels_column]
             chunks_pos = feature[self.chunks_pos_column]
             relevant_chunks = feature[self.relevant_chunks_column]
             
-            # Get ranking targets (teacher scores or labels)
-            if self.scores_column and self.scores_column in feature:
-                ranking_targets = feature[self.scores_column]
-            else:
-                ranking_targets = labels
+            # Handle labels based on mode
+            if self.mode == "reranking_pruning":
+                labels = feature[self.labels_column]
+                # Get ranking targets (teacher scores or labels)
+                if self.scores_column and self.scores_column in feature:
+                    ranking_targets = feature[self.scores_column]
+                else:
+                    ranking_targets = labels
+            else:  # pruning_only
+                # Create dummy labels/targets for compatibility
+                labels = [0] * len(texts)  # Dummy values
+                ranking_targets = [0] * len(texts)  # Dummy values
             
             for doc_idx, (text, label, target, chunk_pos, rel_chunks) in enumerate(
                 zip(texts, labels, ranking_targets, chunks_pos, relevant_chunks)
@@ -227,37 +267,50 @@ class PruningDataCollator:
         # Prepare labels in the format expected by PruningLoss
         max_docs = max(len(feature[self.texts_column]) for feature in features)
         
-        # Ranking targets matrix (can be labels or teacher scores)
-        ranking_targets_matrix = torch.full(
-            (batch_size, max_docs),
-            fill_value=-100,  # Padding value
-            dtype=torch.float32
-        )
-        
-        # Fill matrix
-        for i, feature in enumerate(features):
-            texts = feature[self.texts_column]
-            num_docs = len(texts)
-            
-            # Get targets (teacher scores or labels)
-            if self.scores_column and self.scores_column in feature:
-                targets = feature[self.scores_column]
-            else:
-                targets = feature[self.labels_column]
-            
-            # Fill ranking targets
-            ranking_targets_matrix[i, :num_docs] = torch.tensor(
-                targets, dtype=torch.float32
+        if self.mode == "reranking_pruning":
+            # Ranking targets matrix (can be labels or teacher scores)
+            ranking_targets_matrix = torch.full(
+                (batch_size, max_docs),
+                fill_value=-100,  # Padding value
+                dtype=torch.float32
             )
+            
+            # Fill matrix
+            for i, feature in enumerate(features):
+                texts = feature[self.texts_column]
+                num_docs = len(texts)
+                
+                # Get targets (teacher scores or labels)
+                if self.scores_column and self.scores_column in feature:
+                    targets = feature[self.scores_column]
+                else:
+                    targets = feature[self.labels_column]
+                
+                # Fill ranking targets
+                ranking_targets_matrix[i, :num_docs] = torch.tensor(
+                    targets, dtype=torch.float32
+                )
+        else:
+            # No ranking targets needed for pruning_only
+            ranking_targets_matrix = None
         
         # Prepare output format compatible with PruningLoss
-        labels = {
-            'ranking_targets': ranking_targets_matrix,  # Single target matrix
-            'pruning_labels': pruning_labels,
-            'batch_indices': torch.tensor(batch_indices),
-            'doc_indices': torch.tensor(doc_indices),
-            'docs_per_query': [len(feature[self.texts_column]) for feature in features]
-        }
+        if self.mode == "reranking_pruning":
+            labels = {
+                'ranking_targets': ranking_targets_matrix,  # Single target matrix
+                'pruning_labels': pruning_labels,
+                'batch_indices': torch.tensor(batch_indices),
+                'doc_indices': torch.tensor(doc_indices),
+                'docs_per_query': [len(feature[self.texts_column]) for feature in features]
+            }
+        else:  # pruning_only
+            # Skip ranking targets for pruning_only mode
+            labels = {
+                'pruning_labels': pruning_labels,
+                'batch_indices': torch.tensor(batch_indices),
+                'doc_indices': torch.tensor(doc_indices),
+                'docs_per_query': [len(feature[self.texts_column]) for feature in features]
+            }
         
         # Return in the format expected by PruningLoss
         return {

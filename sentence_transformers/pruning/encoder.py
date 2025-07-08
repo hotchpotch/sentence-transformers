@@ -38,12 +38,11 @@ class PruningEncoder(nn.Module):
     
     This encoder supports two modes:
     1. Reranking + Pruning mode: Ranks query-document pairs and prunes irrelevant content
-    2. Pruning-only mode: Only prunes content without reranking (future implementation)
-    
-    Currently implements the Reranking + Pruning mode based on the Provence paper approach.
+    2. Pruning-only mode: Only prunes content without reranking
     
     Args:
         model_name_or_path (str): HuggingFace model name or path
+        mode (str): Operating mode - "reranking_pruning" or "pruning_only"
         num_labels (int): Number of labels for ranking (default: 1 for regression)
         max_length (int): Maximum sequence length
         device (str): Device to use (cuda/cpu)
@@ -56,6 +55,7 @@ class PruningEncoder(nn.Module):
     def __init__(
         self,
         model_name_or_path: str,
+        mode: str = "reranking_pruning",
         num_labels: int = 1,
         max_length: int = 512,
         device: Optional[str] = None,
@@ -66,8 +66,16 @@ class PruningEncoder(nn.Module):
     ):
         super().__init__()
         
+        # Validate mode
+        if mode not in ["reranking_pruning", "pruning_only"]:
+            raise ValueError(
+                f"Invalid mode: {mode}. "
+                f"Must be 'reranking_pruning' or 'pruning_only'"
+            )
+        
         # Initialize config
         self.model_name_or_path = model_name_or_path
+        self.mode = mode
         self.num_labels = num_labels
         self.max_length = max_length
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
@@ -78,14 +86,6 @@ class PruningEncoder(nn.Module):
         model_args = model_args or {}
         pruning_config = pruning_config or {}
         
-        # Load config
-        self.config = AutoConfig.from_pretrained(
-            model_name_or_path,
-            num_labels=num_labels,
-            cache_dir=cache_dir,
-            **model_args
-        )
-        
         # Load tokenizer
         self.tokenizer = AutoTokenizer.from_pretrained(
             model_name_or_path,
@@ -93,15 +93,44 @@ class PruningEncoder(nn.Module):
             **tokenizer_args
         )
         
-        # Load ranking model
-        self.ranking_model = AutoModelForSequenceClassification.from_pretrained(
-            model_name_or_path,
-            config=self.config,
-            cache_dir=cache_dir,
-            **model_args
-        )
+        # Mode-specific model initialization
+        if mode == "reranking_pruning":
+            # Load config for ranking
+            self.config = AutoConfig.from_pretrained(
+                model_name_or_path,
+                num_labels=num_labels,
+                cache_dir=cache_dir,
+                **model_args
+            )
+            
+            # Load ranking model
+            self.ranking_model = AutoModelForSequenceClassification.from_pretrained(
+                model_name_or_path,
+                config=self.config,
+                cache_dir=cache_dir,
+                **model_args
+            )
+            self.encoder = None  # Not used in this mode
+            
+        elif mode == "pruning_only":
+            # Load config for encoder
+            self.config = AutoConfig.from_pretrained(
+                model_name_or_path,
+                cache_dir=cache_dir,
+                **model_args
+            )
+            
+            # Load base encoder (no classification head)
+            from transformers import AutoModel
+            self.encoder = AutoModel.from_pretrained(
+                model_name_or_path,
+                config=self.config,
+                cache_dir=cache_dir,
+                **model_args
+            )
+            self.ranking_model = None  # Not used in this mode
         
-        # Initialize pruning head
+        # Initialize pruning head (common for both modes)
         hidden_size = self.config.hidden_size
         pruning_head_config = PruningHeadConfig(
             hidden_size=pruning_config.get("hidden_size", hidden_size),
@@ -136,7 +165,7 @@ class PruningEncoder(nn.Module):
         **kwargs  # Accept additional kwargs like token_type_ids
     ) -> Dict[str, torch.Tensor]:
         """
-        Forward pass for both ranking and pruning.
+        Forward pass for ranking and/or pruning based on mode.
         
         Args:
             input_ids: Tokenized input IDs
@@ -145,22 +174,37 @@ class PruningEncoder(nn.Module):
             return_dict: Whether to return a dictionary
             
         Returns:
-            Dictionary with ranking_logits and pruning_logits
+            Dictionary with mode-appropriate outputs
         """
-        # Get outputs from ranking model
-        outputs = self.ranking_model(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            output_hidden_states=True
-        )
+        if self.mode == "reranking_pruning":
+            # Get outputs from ranking model
+            outputs = self.ranking_model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                output_hidden_states=True
+            )
+            
+            # Ranking logits
+            ranking_logits = outputs.logits
+            
+            # Get hidden states for pruning
+            hidden_states = outputs.hidden_states[-1]  # Last layer
+            
+        elif self.mode == "pruning_only":
+            # Get outputs from encoder only
+            outputs = self.encoder(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                output_hidden_states=False
+            )
+            
+            # No ranking logits in pruning_only mode
+            ranking_logits = None
+            
+            # Get hidden states for pruning
+            hidden_states = outputs.last_hidden_state
         
-        # Ranking logits
-        ranking_logits = outputs.logits
-        
-        # Get hidden states for pruning
-        hidden_states = outputs.hidden_states[-1]  # Last layer
-        
-        # Get pruning predictions
+        # Get pruning predictions (common for both modes)
         pruning_outputs = self.pruning_head(
             hidden_states=hidden_states,
             attention_mask=attention_mask,
@@ -168,13 +212,23 @@ class PruningEncoder(nn.Module):
         )
         
         if return_dict:
-            return {
-                "ranking_logits": ranking_logits,
-                "pruning_logits": pruning_outputs.logits,
-                "hidden_states": hidden_states
-            }
+            if self.mode == "reranking_pruning":
+                return {
+                    "ranking_logits": ranking_logits,
+                    "pruning_logits": pruning_outputs.logits,
+                    "hidden_states": hidden_states
+                }
+            else:  # pruning_only
+                return {
+                    "pruning_logits": pruning_outputs.logits,
+                    "hidden_states": hidden_states
+                }
         
-        return ranking_logits, pruning_outputs.logits
+        # Non-dict return
+        if self.mode == "reranking_pruning":
+            return ranking_logits, pruning_outputs.logits
+        else:
+            return pruning_outputs.logits
     
     def predict(
         self,
@@ -204,6 +258,13 @@ class PruningEncoder(nn.Module):
             If apply_pruning is False: Ranking scores
             If apply_pruning is True: List of RerankingPruningOutput objects
         """
+        # Validate mode
+        if self.mode == "pruning_only":
+            if not apply_pruning:
+                raise ValueError(
+                    "predict() returns ranking scores and is not available in pruning_only mode. "
+                    "Use prune_texts() or set apply_pruning=True."
+                )
         if apply_pruning:
             # Use predict_with_pruning for full functionality
             return self.predict_with_pruning(
@@ -324,11 +385,15 @@ class PruningEncoder(nn.Module):
                 )
                 
                 # Get predictions
-                ranking_logits = outputs["ranking_logits"]
-                if self.num_labels == 1:
-                    ranking_scores = self.activation_fn(ranking_logits).squeeze(-1)
+                if self.mode == "reranking_pruning":
+                    ranking_logits = outputs["ranking_logits"]
+                    if self.num_labels == 1:
+                        ranking_scores = self.activation_fn(ranking_logits).squeeze(-1)
+                    else:
+                        ranking_scores = torch.nn.functional.softmax(ranking_logits, dim=-1)[:, 1]
                 else:
-                    ranking_scores = torch.nn.functional.softmax(ranking_logits, dim=-1)[:, 1]
+                    # No ranking scores in pruning_only mode
+                    ranking_scores = torch.zeros(len(batch), device=self.device)
                 
                 # Get token-level pruning predictions
                 pruning_logits = outputs["pruning_logits"]
@@ -477,11 +542,15 @@ class PruningEncoder(nn.Module):
                 )
                 
                 # Get predictions
-                ranking_logits = outputs["ranking_logits"]
-                if self.num_labels == 1:
-                    ranking_scores = self.activation_fn(ranking_logits).squeeze(-1)
+                if self.mode == "reranking_pruning":
+                    ranking_logits = outputs["ranking_logits"]
+                    if self.num_labels == 1:
+                        ranking_scores = self.activation_fn(ranking_logits).squeeze(-1)
+                    else:
+                        ranking_scores = torch.nn.functional.softmax(ranking_logits, dim=-1)[:, 1]
                 else:
-                    ranking_scores = torch.nn.functional.softmax(ranking_logits, dim=-1)[:, 1]
+                    # No ranking scores in pruning_only mode
+                    ranking_scores = torch.zeros(len(batch), device=self.device)
                 
                 pruning_logits = outputs["pruning_logits"]
                 pruning_probs = torch.nn.functional.softmax(pruning_logits, dim=-1)
@@ -640,6 +709,65 @@ class PruningEncoder(nn.Module):
         else:
             return output.pruned_documents[0]
     
+    def prune_texts(
+        self,
+        queries: List[str],
+        texts: List[str],
+        threshold: float = 0.5,
+        batch_size: int = 32,
+        return_tokens: bool = False,
+        show_progress_bar: bool = False
+    ) -> List[Dict[str, Any]]:
+        """
+        Simple API for text pruning without ranking (pruning_only mode).
+        
+        Args:
+            queries: List of queries
+            texts: List of texts to prune
+            threshold: Pruning threshold (0-1)
+            batch_size: Batch size for processing
+            return_tokens: Whether to return token-level masks
+            show_progress_bar: Show progress bar
+            
+        Returns:
+            List of dicts with:
+            - pruned_text: Pruned text
+            - kept_ratio: Percentage of text kept
+            - pruning_mask: Token-level mask (if return_tokens=True)
+        """
+        if self.mode != "pruning_only":
+            logger.warning(
+                "prune_texts() is optimized for pruning_only mode. "
+                "Consider using predict() or predict_with_pruning() for reranking_pruning mode."
+            )
+        
+        # Convert to pairs format
+        sentences = [(q, t) for q, t in zip(queries, texts)]
+        
+        # Use predict_with_pruning internally
+        outputs = self.predict_with_pruning(
+            sentences=sentences,
+            batch_size=batch_size,
+            pruning_threshold=threshold,
+            return_documents=True,
+            show_progress_bar=show_progress_bar
+        )
+        
+        # Format results
+        results = []
+        for i, output in enumerate(outputs):
+            result = {
+                "pruned_text": output.pruned_documents[0] if output.pruned_documents else texts[i],
+                "kept_ratio": 1.0 - output.compression_ratio
+            }
+            
+            if return_tokens:
+                result["pruning_mask"] = output.pruning_mask
+            
+            results.append(result)
+        
+        return results
+    
     def save_pretrained(self, save_directory: Union[str, Path]) -> None:
         """Save the model to a directory."""
         save_directory = Path(save_directory)
@@ -648,18 +776,25 @@ class PruningEncoder(nn.Module):
         # Save config
         config_dict = {
             "model_name_or_path": self.model_name_or_path,
+            "mode": self.mode,  # Save mode
             "num_labels": self.num_labels,
             "max_length": self.max_length,
             "pruning_config": self.pruning_head.config.to_dict(),
-            "architecture": "ProvenceEncoder"
+            "architecture": "PruningEncoder"
         }
         
         with open(save_directory / "config.json", "w") as f:
             json.dump(config_dict, f, indent=2)
         
-        # Save ranking model
-        self.ranking_model.save_pretrained(save_directory / "ranking_model")
-        self.tokenizer.save_pretrained(save_directory / "ranking_model")
+        # Save models based on mode
+        if self.mode == "reranking_pruning":
+            # Save ranking model
+            self.ranking_model.save_pretrained(save_directory / "ranking_model")
+            self.tokenizer.save_pretrained(save_directory / "ranking_model")
+        elif self.mode == "pruning_only":
+            # Save encoder model
+            self.encoder.save_pretrained(save_directory / "encoder_model")
+            self.tokenizer.save_pretrained(save_directory / "encoder_model")
         
         # Save pruning head
         self.pruning_head.save_pretrained(save_directory / "pruning_head")
@@ -670,17 +805,27 @@ class PruningEncoder(nn.Module):
         model_name_or_path: Union[str, Path],
         device: Optional[str] = None,
         **kwargs
-    ) -> "ProvenceEncoder":
-        """Load a pretrained ProvenceEncoder."""
+    ) -> "PruningEncoder":
+        """Load a pretrained PruningEncoder."""
         model_path = Path(model_name_or_path)
         
         # Load config
         with open(model_path / "config.json", "r") as f:
             config = json.load(f)
         
+        # Get mode (default to reranking_pruning for backward compatibility)
+        mode = config.get("mode", "reranking_pruning")
+        
+        # Determine model subdirectory based on mode
+        if mode == "reranking_pruning":
+            model_subdir = "ranking_model"
+        else:  # pruning_only
+            model_subdir = "encoder_model"
+        
         # Create encoder
         encoder = cls(
-            model_name_or_path=str(model_path / "ranking_model"),
+            model_name_or_path=str(model_path / model_subdir),
+            mode=mode,
             num_labels=config["num_labels"],
             max_length=config["max_length"],
             device=device,
@@ -698,9 +843,12 @@ class PruningEncoder(nn.Module):
         
         return encoder
     
-    def to(self, device: Union[str, torch.device]) -> "ProvenceEncoder":
+    def to(self, device: Union[str, torch.device]) -> "PruningEncoder":
         """Move model to device."""
         self.device = device
-        self.ranking_model.to(device)
+        if self.mode == "reranking_pruning":
+            self.ranking_model.to(device)
+        else:  # pruning_only
+            self.encoder.to(device)
         self.pruning_head.to(device)
         return self
