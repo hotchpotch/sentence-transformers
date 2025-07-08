@@ -17,7 +17,7 @@ from tqdm import tqdm
 
 from .encoder import ProvenceEncoder
 from .losses import ProvenceLoss
-from .data_collator import ProvenceDataCollator
+from .data_collator_chunk_based import ProvenceChunkBasedDataCollator
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ class ProvenceTrainer:
         model: ProvenceEncoder,
         train_dataset: Union[Dataset, HFDataset],
         eval_dataset: Optional[Union[Dataset, HFDataset]] = None,
-        data_collator: Optional[ProvenceDataCollator] = None,
+        data_collator: Optional[ProvenceChunkBasedDataCollator] = None,
         loss_fn: Optional[nn.Module] = None,
         optimizer: Optional[torch.optim.Optimizer] = None,
         scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None,
@@ -78,11 +78,11 @@ class ProvenceTrainer:
         
         # Data collator
         if data_collator is None:
-            data_collator = ProvenceDataCollator(
+            data_collator = ProvenceChunkBasedDataCollator(
                 tokenizer=model.tokenizer,
-                text_chunker=model.text_chunker,
                 max_length=model.max_length,
-                sentence_level_pruning=False  # Default to token-level
+                padding=True,
+                truncation=True
             )
         self.data_collator = data_collator
         

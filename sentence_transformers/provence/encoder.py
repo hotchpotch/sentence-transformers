@@ -106,8 +106,8 @@ class ProvenceEncoder(nn.Module):
         )
         self.pruning_head = ProvencePruningHead(pruning_head_config)
         
-        # Text chunker for sentence segmentation
-        self.text_chunker = MultilingualChunker()
+        # Text chunker for sentence segmentation (only needed for raw text API)
+        self.text_chunker = None
         
         # Activation function for ranking scores
         if num_labels == 1:
@@ -243,7 +243,7 @@ class ProvenceEncoder(nn.Module):
         show_progress_bar: bool = False,
     ) -> Union[ProvenceOutput, List[ProvenceOutput]]:
         """
-        Predict both ranking scores and pruning masks.
+        Predict with token-level pruning.
         
         Args:
             sentences: Query-document pairs
@@ -269,84 +269,117 @@ class ProvenceEncoder(nn.Module):
             disable=not show_progress_bar,
         ):
             batch = sentences[start_idx:start_idx + batch_size]
-            queries = [pair[0] for pair in batch]
-            documents = [pair[1] for pair in batch]
             
-            # Get sentence chunks for each document
-            batch_sentences = []
-            batch_boundaries = []
-            
-            for doc in documents:
-                chunks = self.text_chunker.chunk_text(doc, language="auto")
-                sentences_list = [chunk for chunk, _ in chunks]
-                batch_sentences.append(sentences_list)
-                
-                # For now, use dummy boundaries
-                boundaries = [[i*10, (i+1)*10] for i in range(len(sentences_list))]
-                batch_boundaries.append(boundaries)
-            
-            # Tokenize
+            # Tokenize with offset mapping
             encoded = self.tokenizer(
                 batch,
                 padding=True,
                 truncation=True,
                 max_length=self.max_length,
-                return_tensors="pt"
-            ).to(self.device)
+                return_tensors="pt",
+                return_offsets_mapping=True
+            )
+            
+            input_ids = encoded['input_ids'].to(self.device)
+            attention_mask = encoded['attention_mask'].to(self.device)
+            offset_mapping = encoded['offset_mapping']
             
             with torch.no_grad():
-                outputs = self.forward(**encoded)
+                outputs = self.forward(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask
+                )
                 
-                # Get ranking scores
+                # Get predictions
                 ranking_logits = outputs["ranking_logits"]
                 if self.num_labels == 1:
                     ranking_scores = self.activation_fn(ranking_logits).squeeze(-1)
                 else:
                     ranking_scores = torch.nn.functional.softmax(ranking_logits, dim=-1)[:, 1]
                 
-                # Get pruning predictions
+                # Get token-level pruning predictions
                 pruning_logits = outputs["pruning_logits"]
                 pruning_probs = torch.nn.functional.softmax(pruning_logits, dim=-1)
-                keep_probs = pruning_probs[:, :, 1]  # Probability of keeping
+                keep_probs = pruning_probs[:, :, 1]  # Probability of keeping each token
                 
                 # Process each example
                 for i in range(len(batch)):
-                    # Create sentence-level masks
-                    sentences_i = batch_sentences[i]
-                    num_sentences = len(sentences_i)
+                    query, document = batch[i]
+                    tokens = self.tokenizer.convert_ids_to_tokens(input_ids[i])
+                    offsets = offset_mapping[i]
                     
-                    # Average pooling over sentence tokens
-                    sentence_masks = []
-                    for j in range(num_sentences):
-                        # Simple heuristic: use first num_sentences positions
-                        if j < keep_probs.shape[1]:
-                            prob = keep_probs[i, j].item()
-                            sentence_masks.append(prob > pruning_threshold)
-                        else:
-                            sentence_masks.append(True)  # Keep by default
+                    # Find document boundaries using </s> token (eos_token_id)
+                    eos_token_id = self.tokenizer.eos_token_id or 2  # XLMRoberta uses ID 2 for </s>
+                    sep_positions = (input_ids[i] == eos_token_id).nonzero(as_tuple=True)[0]
                     
-                    # Calculate metrics
-                    num_pruned = sum(1 for mask in sentence_masks if not mask)
-                    compression_ratio = num_pruned / len(sentence_masks) if sentence_masks else 0
-                    
-                    # Create output
-                    output = ProvenceOutput(
-                        ranking_scores=ranking_scores[i].cpu().numpy(),
-                        pruning_masks=np.array([sentence_masks]),
-                        sentences=[sentences_i],
-                        compression_ratio=compression_ratio,
-                        num_pruned_sentences=num_pruned
-                    )
-                    
-                    # Add pruned document if requested
-                    if return_documents:
-                        pruned_doc = self.text_chunker.reconstruct_text(
-                            sentences_i,
-                            sentence_masks
+                    if len(sep_positions) >= 2:
+                        # Format: <s> query </s> <s> document </s>
+                        # So document starts after first </s> + <s>
+                        doc_start = sep_positions[0].item() + 2  # Skip </s> and <s>
+                        doc_end = sep_positions[1].item()
+                        
+                        # Get document tokens and their keep probabilities
+                        doc_keep_probs = keep_probs[i, doc_start:doc_end]
+                        doc_tokens = tokens[doc_start:doc_end]
+                        doc_offsets = offsets[doc_start:doc_end]
+                        
+                        # Apply threshold
+                        keep_mask = doc_keep_probs > pruning_threshold
+                        
+                        # Calculate metrics
+                        num_kept = keep_mask.sum().item()
+                        num_total = len(doc_tokens)
+                        compression_ratio = 1.0 - (num_kept / num_total) if num_total > 0 else 0.0
+                        
+                        # Reconstruct pruned document
+                        pruned_doc = ""
+                        if return_documents:
+                            kept_ranges = []
+                            for j, (keep, (start, end)) in enumerate(zip(keep_mask, doc_offsets)):
+                                if keep and start != 0:  # Skip special tokens
+                                    kept_ranges.append((start.item(), end.item()))
+                            
+                            # Merge overlapping ranges
+                            if kept_ranges:
+                                kept_ranges.sort()
+                                merged_ranges = [kept_ranges[0]]
+                                for start, end in kept_ranges[1:]:
+                                    if start <= merged_ranges[-1][1]:
+                                        merged_ranges[-1] = (merged_ranges[-1][0], max(merged_ranges[-1][1], end))
+                                    else:
+                                        merged_ranges.append((start, end))
+                                
+                                # Extract text
+                                pruned_parts = []
+                                for start, end in merged_ranges:
+                                    pruned_parts.append(document[start:end])
+                                pruned_doc = " ".join(pruned_parts)
+                        
+                        # Create output (compatible with original format)
+                        output = ProvenceOutput(
+                            ranking_scores=ranking_scores[i].cpu().numpy(),
+                            pruning_masks=np.array([keep_mask.cpu().numpy()]),
+                            sentences=[doc_tokens],  # Store tokens instead of sentences
+                            compression_ratio=compression_ratio,
+                            num_pruned_sentences=num_total - num_kept  # Actually num pruned tokens
                         )
-                        output.pruned_documents = [pruned_doc]
-                    
-                    all_outputs.append(output)
+                        
+                        if return_documents:
+                            output.pruned_documents = [pruned_doc]
+                        
+                        all_outputs.append(output)
+                    else:
+                        # Failed to find document boundaries, create empty output
+                        output = ProvenceOutput(
+                            ranking_scores=ranking_scores[i].cpu().numpy(),
+                            pruning_masks=np.array([[]]),
+                            sentences=[[]],
+                            compression_ratio=0.0,
+                            num_pruned_sentences=0
+                        )
+                        if return_documents:
+                            output.pruned_documents = [""]
+                        all_outputs.append(output)
         
         return all_outputs[0] if single_input else all_outputs
     
@@ -359,13 +392,13 @@ class ProvenceEncoder(nn.Module):
         return_sentences: bool = False,
     ) -> Union[str, Dict[str, Any]]:
         """
-        Prune a single document based on a query.
+        Prune a single document based on a query using token-level pruning.
         
         Args:
             query: Query text
             document: Document text to prune
             threshold: Pruning threshold
-            min_sentences: Minimum sentences to keep
+            min_sentences: Ignored (kept for compatibility)
             return_sentences: Return detailed info
             
         Returns:
@@ -380,11 +413,11 @@ class ProvenceEncoder(nn.Module):
         if return_sentences:
             return {
                 "pruned_document": output.pruned_documents[0],
-                "sentences": output.sentences[0],
-                "pruning_masks": output.pruning_masks[0].tolist(),
+                "sentences": [],  # Not applicable for token-level pruning
+                "pruning_masks": [],  # Not applicable
                 "ranking_score": float(output.ranking_scores),
                 "compression_ratio": output.compression_ratio,
-                "num_pruned_sentences": output.num_pruned_sentences
+                "num_pruned_sentences": 0  # Not applicable
             }
         else:
             return output.pruned_documents[0]

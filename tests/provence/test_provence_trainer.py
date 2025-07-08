@@ -12,9 +12,9 @@ from datasets import Dataset
 from sentence_transformers.provence import (
     ProvenceEncoder,
     ProvenceTrainer,
-    ProvenceLoss,
-    ProvenceDataCollator
+    ProvenceLoss
 )
+from sentence_transformers.provence.data_collator_chunk_based import ProvenceChunkBasedDataCollator
 
 
 class TestProvenceTrainer:

@@ -4,6 +4,7 @@
 - 2025-01-07: 初版作成
 - 2025-01-07: Sentence Transformers統合設計追加
 - 2025-01-07: Provence実装完了、バッチ学習アプローチ確立
+- 2025-01-08: トークンレベルプルーニング実装完了、ja-minimal評価済み
 
 ## 概要
 
@@ -14,10 +15,11 @@ Sentence TransformersにProvence論文ベースのtext-pruner機能を実装す�
 - [x] 仕様策定
 - [x] アーキテクチャ設計
 - [x] ProvenceEncoderクラス実装（sentence_transformers/provence/）
-- [x] データローダー実装（バッチ処理対応）
-- [x] 損失関数実装（ProvenceLoss、ProvenceBatchedLoss）
-- [x] 評価メトリクス実装（基本的な圧縮率評価）
-- [x] サンプルコード作成（scripts/以下に学習・評価スクリプト）
+- [x] データローダー実装（チャンクベースのダイナミックラベル生成）
+- [x] 損失関数実装（ProvenceChunkBasedLoss）
+- [x] トークンレベルプルーニング実装
+- [x] 評価メトリクス実装（圧縮率、ランキング性能）
+- [x] 学習・評価スクリプト作成（ja-minimal対応）
 - [ ] ドキュメント作成（API仕様等）
 - [ ] テスト実装
 - [ ] PR作成
@@ -29,18 +31,19 @@ Sentence TransformersにProvence論文ベースのtext-pruner機能を実装す�
 - **バッチサイズ**: 48クエリ × 5テキスト = 240ペア/バッチ
 - **教師モデル**: hotchpotch/japanese-reranker-xsmall-v2による蒸留
 
-### 学習結果（100kデータセット）
-| 閾値 | 平均圧縮率 | 圧縮文書の割合 | 備考 |
-|------|------------|----------------|------|
-| 0.01 | 9.6% | 35% | 保守的 |
-| 0.1 | 29.3% | 98% | バランス良好 |
-| 0.2 | 30.0% | 100% | 実用的 |
-| 0.3 | 46.9% | 100% | 積極的 |
+### 学習結果（ja-minimalデータセット）
+| 閾値 | 全体圧縮率 | POS圧縮率 | NEG圧縮率 | 備考 |
+|------|------------|-----------|-----------|------|
+| 0.1 | 70.8% | 39.9% | 78.6% | 保守的 |
+| 0.3 | 79.9% | 51.7% | 86.9% | バランス良好 |
+| 0.5 | 84.6% | 61.5% | 90.4% | 実用的 |
+| 0.7 | 88.9% | 70.2% | 93.6% | 積極的 |
 
 ### 特徴
+- トークンレベルの細かなプルーニングが可能
 - 関連性に応じた適切なプルーニング（高関連文書は控えめ、低関連文書は積極的）
-- 低い閾値でも適切な圧縮が可能
-- 教師スコアとの相関を維持しつつ、効率的な圧縮を実現
+- チャンクベースのラベル生成により、関連情報を効率的に保持
+- 教師スコアとの相関を維持（POS: 0.690 vs 0.696、NEG: 0.164 vs 0.167）
 
 ## アーキテクチャ設計
 
@@ -67,23 +70,20 @@ Sentence TransformersにProvence論文ベースのtext-pruner機能を実装す�
 sentence_transformers/
 ├── provence/                    # Provence実装（実装済み）
 │   ├── __init__.py
-│   ├── encoder.py              # ProvenceEncoderクラス
-│   ├── losses.py               # ProvenceLoss実装
-│   ├── losses_batched.py       # バッチ対応損失関数
-│   ├── data_collator.py        # ProvenceDataCollator
-│   ├── data_collator_batched.py # バッチ対応コレクター
+│   ├── encoder.py              # ProvenceEncoderクラス（トークンレベル対応）
+│   ├── losses_chunk_based.py   # チャンクベース損失関数
+│   ├── data_collator_chunk_based.py # ダイナミックラベル生成
 │   ├── trainer.py              # ProvenceTrainer
-│   └── outputs.py              # 出力データクラス
+│   ├── data_structures.py      # データ構造定義
+│   └── models/
+│       └── pruning_head.py     # プルーニングヘッド実装
 ├── utils/
 │   └── text_chunking.py        # 言語別文分割（実装済み）
-└── models/                      
-    └── Transformer.py          # 既存（Provence対応済み）
 
 scripts/                         # 学習・評価スクリプト（実装済み）
-├── process_100k_dataset_batched.py
-├── train_provence_100k_batched.py  
-├── evaluate_provence_100k_batched.py
-└── ...
+├── train_ja_minimal.py         # ja-minimal学習
+├── evaluate_ja_minimal.py      # ja-minimal評価
+└── check_ja_dataset.py         # データセット確認
 ```
 
 **実装アプローチ**：

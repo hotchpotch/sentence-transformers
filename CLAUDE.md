@@ -55,12 +55,15 @@ uv run python tmp/sample.py   # tmpディレクトリのサンプルコード実
 
 3. **実装済みコンポーネント**:
    - `sentence_transformers/provence/` - Provence実装
-     - `encoder.py` - ProvenceEncoderクラス（メインクラス）
-     - `losses.py` - ProvenceLoss（統合損失関数）
-     - `losses_batched.py` - バッチ対応損失（Hard Negative学習）
+     - `encoder.py` - ProvenceEncoderクラス（トークンレベルプルーニング対応）
+     - `losses_chunk_based.py` - チャンクベース損失関数
+     - `data_collator_chunk_based.py` - 動的ラベル生成コレーター
      - `trainer.py` - ProvenceTrainer
+     - `models/pruning_head.py` - プルーニングヘッド実装
    - `scripts/` - 学習・評価スクリプト群
-   - 100kデータセットでの学習済み（平均29.3%圧縮@閾値0.1）
+     - `train_ja_minimal.py` - ja-minimalデータセット学習
+     - `evaluate_ja_minimal.py` - 評価スクリプト
+   - ja-minimalデータセットでの学習済み（閾値0.3で約30-60%圧縮）
 
 ### 参考ドキュメント
 
@@ -100,10 +103,16 @@ uv run python tmp/sample.py   # tmpディレクトリのサンプルコード実
 
 #### 実装済み機能
 - ProvenceEncoder: デュアルヘッド（ランキング＋プルーニング）アーキテクチャ
+- トークンレベルプルーニング: チャンクベースの動的ラベル生成
 - バッチ学習: Hard Negative学習による効率的な学習
-- 多言語対応: 日本語・英語の文分割機能
 - 教師蒸留: 既存リランカーからの知識蒸留
-- 動的プルーニング: クエリに応じた適応的な圧縮
+- 動的プルーニング: クエリに応じた適応的な圧縮（閾値により0-100%）
+
+#### 最新の実装状況（2025年1月）
+- チャンクベースのプルーニングラベル生成が完成
+- トークンレベルでの正確なプルーニングが動作
+- ja-minimalデータセットでの学習・評価が完了
+- 閾値0.3で実用的な圧縮率（ポジティブ: 30-60%、ネガティブ: 80-90%）
 
 ### 仕様書管理
 

@@ -5,7 +5,7 @@ Unit tests for ProvenceDynamicDataCollator.
 import pytest
 import torch
 from transformers import AutoTokenizer
-from sentence_transformers.provence.data_collator_dynamic import ProvenceDynamicDataCollator
+from sentence_transformers.provence.data_collator_chunk_based import ProvenceChunkBasedDataCollator
 
 
 class TestProvenceDynamicDataCollator:
@@ -19,7 +19,7 @@ class TestProvenceDynamicDataCollator:
     @pytest.fixture
     def collator(self, tokenizer):
         """Create a data collator instance."""
-        return ProvenceDynamicDataCollator(
+        return ProvenceChunkBasedDataCollator(
             tokenizer=tokenizer,
             max_length=128,
             padding=True,
@@ -38,7 +38,9 @@ class TestProvenceDynamicDataCollator:
                     'Deep learning uses neural networks.'
                 ],
                 'ranking_labels': [1, 0, 1],  # First and third are relevant
-                'teacher_scores': [0.9, 0.1, 0.8]
+                'teacher_scores': [0.9, 0.1, 0.8],
+                'chunks_pos': [[[0, 35]], [[0, 34]], [[0, 35]]],  # Mock chunk positions
+                'relevant_chunks': [[0], [], [0]]  # Only first and third have relevant chunks
             },
             {
                 'query': 'How to cook pasta?',
@@ -47,7 +49,9 @@ class TestProvenceDynamicDataCollator:
                     'Machine learning is fascinating.'
                 ],
                 'ranking_labels': [1, 0],  # Only first is relevant
-                'teacher_scores': [0.95, 0.05]
+                'teacher_scores': [0.95, 0.05],
+                'chunks_pos': [[[0, 25]], [[0, 31]]],  # Mock chunk positions
+                'relevant_chunks': [[0], []]  # Only first has relevant chunks
             }
         ]
         
@@ -198,10 +202,11 @@ class TestProvenceDynamicDataCollator:
     
     def test_mini_batch_processing(self, tokenizer):
         """Test collator with mini-batch processing."""
-        collator = ProvenceDynamicDataCollator(
+        collator = ProvenceChunkBasedDataCollator(
             tokenizer=tokenizer,
             max_length=128,
-            mini_batch_size=4  # Process in mini-batches of 4
+            padding=True,
+            truncation=True
         )
         
         # Create data with more pairs than mini_batch_size

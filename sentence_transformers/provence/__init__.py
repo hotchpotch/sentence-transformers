@@ -6,7 +6,7 @@ from .data_structures import ProvenceConfig, ProvenceOutput
 from .encoder import ProvenceEncoder
 from .trainer import ProvenceTrainer
 from .losses import ProvenceLoss
-from .data_collator import ProvenceDataCollator
+from .data_collator_chunk_based import ProvenceChunkBasedDataCollator
 
 __all__ = [
     "ProvenceConfig",
@@ -14,5 +14,5 @@ __all__ = [
     "ProvenceEncoder",
     "ProvenceTrainer",
     "ProvenceLoss",
-    "ProvenceDataCollator"
+    "ProvenceChunkBasedDataCollator"
 ]
