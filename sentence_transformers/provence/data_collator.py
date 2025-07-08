@@ -1,5 +1,5 @@
 """
-Chunk-based data collator for Provence training that generates pruning labels based on relevant chunks.
+Data collator for Provence training that generates pruning labels based on relevant chunks.
 """
 
 from typing import Dict, List, Any, Optional, Union, Tuple
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class ProvenceChunkBasedDataCollator:
+class ProvenceDataCollator:
     """
     Data collator for Provence training that dynamically generates pruning labels based on chunk relevance.
     
