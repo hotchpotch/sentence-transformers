@@ -152,6 +152,63 @@ class PruningEncoder(nn.Module):
         
         # Move to device
         self.to(self.device)
+    
+    def _create_model_readme(self, save_directory: Path) -> None:
+        """Create a README file explaining how to load the model."""
+        readme_content = f"""# PruningEncoder Model
+
+This model supports multiple loading methods depending on your use case.
+
+## Loading Options
+
+### 1. Full Model with Pruning Capabilities
+```python
+from sentence_transformers.pruning import PruningEncoder
+model = PruningEncoder.from_pretrained("{save_directory}")
+
+# Use with pruning
+outputs = model.predict_with_pruning([("query", "document")])
+print(f"Score: {{outputs[0].ranking_scores}}")
+print(f"Compression: {{outputs[0].compression_ratio}}")
+```
+
+### 2. Base Ranking Model Only (No Pruning)
+```python
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
+# Load base model directly
+model = AutoModelForSequenceClassification.from_pretrained("{save_directory}/ranking_model")
+tokenizer = AutoTokenizer.from_pretrained("{save_directory}/ranking_model")
+
+# Standard inference
+inputs = tokenizer("query", "document", return_tensors="pt")
+outputs = model(**inputs)
+score = torch.sigmoid(outputs.logits).item()
+```
+
+### 3. CrossEncoder Compatible
+```python
+import sentence_transformers
+from sentence_transformers import CrossEncoder
+
+model = CrossEncoder("{save_directory}")
+scores = model.predict([("query", "document")])
+```
+
+## Model Details
+- Mode: {self.mode}
+- Base Model: {self.model_name_or_path}
+- Max Length: {self.max_length}
+
+## When to Use Each Method
+- **Full PruningEncoder**: When you need query-dependent text pruning
+- **Base Ranking Model**: When you only need ranking scores (faster, smaller)
+- **CrossEncoder**: For compatibility with existing CrossEncoder workflows
+"""
+        
+        readme_path = save_directory / "README.md"
+        with open(readme_path, 'w') as f:
+            f.write(readme_content)
         
         # Default Pruning config
         self.pruning_config = PruningConfig()
@@ -860,6 +917,9 @@ class PruningEncoder(nn.Module):
         
         # Save pruning head
         self.pruning_head.save_pretrained(save_directory / "pruning_head")
+        
+        # Create README for users
+        self._create_model_readme(save_directory)
     
     @classmethod
     def from_pretrained(
@@ -908,6 +968,55 @@ class PruningEncoder(nn.Module):
         encoder.to(encoder.device)
         
         return encoder
+    
+    def export_ranking_model(self, save_directory: Union[str, Path]) -> None:
+        """Export only the base ranking model for standard Transformers usage.
+        
+        This creates a standalone model that can be loaded with:
+        AutoModelForSequenceClassification.from_pretrained(save_directory)
+        
+        Args:
+            save_directory: Directory to save the model
+        """
+        if self.mode != "reranking_pruning":
+            raise ValueError("export_ranking_model() is only available for reranking_pruning mode")
+        
+        save_directory = Path(save_directory)
+        save_directory.mkdir(parents=True, exist_ok=True)
+        
+        # Save the ranking model and tokenizer
+        logger.info(f"Exporting ranking model to {save_directory}")
+        self.ranking_model.save_pretrained(save_directory)
+        self.tokenizer.save_pretrained(save_directory)
+        
+        # Create a simple README
+        readme_content = f"""# Exported Ranking Model
+
+This is the base ranking model extracted from a PruningEncoder.
+
+## Usage
+```python
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
+model = AutoModelForSequenceClassification.from_pretrained("{save_directory}")
+tokenizer = AutoTokenizer.from_pretrained("{save_directory}")
+
+# Inference
+inputs = tokenizer("query", "document", return_tensors="pt")
+outputs = model(**inputs)
+score = torch.sigmoid(outputs.logits).item()
+```
+
+## Original Model
+- Base Model: {self.model_name_or_path}
+- Exported from PruningEncoder in reranking_pruning mode
+"""
+        
+        with open(save_directory / "README.md", 'w') as f:
+            f.write(readme_content)
+        
+        logger.info(f"✓ Ranking model exported successfully!")
+        logger.info(f"  Load with: AutoModelForSequenceClassification.from_pretrained('{save_directory}')")
     
     def to(self, device: Union[str, torch.device]) -> "PruningEncoder":
         """Move model to device."""
