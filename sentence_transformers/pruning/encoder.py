@@ -784,8 +784,21 @@ class PruningEncoder(nn.Module):
         
         return results
     
+    def _copy_model_files_for_transformers(self, save_directory: Path) -> None:
+        """Copy model files for Transformers compatibility."""
+        import shutil
+        from pathlib import Path as PathLib
+        
+        # Copy the modeling file that supports AutoModel loading
+        modeling_file = PathLib(__file__).parent / "modeling_pruning_encoder.py"
+        if modeling_file.exists():
+            shutil.copy(modeling_file, save_directory / "modeling_pruning_encoder.py")
+    
     def save_pretrained(self, save_directory: Union[str, Path]) -> None:
         """Save the model to a directory."""
+        import shutil
+        from pathlib import Path as PathLib
+        
         save_directory = Path(save_directory)
         save_directory.mkdir(parents=True, exist_ok=True)
         
@@ -802,7 +815,11 @@ class PruningEncoder(nn.Module):
         with open(save_directory / "pruning_encoder_config.json", "w") as f:
             json.dump(pruning_encoder_config, f, indent=2)
         
-        # Save Transformers-compatible config.json
+        # Copy necessary Python files to the model directory
+        # This is required for auto_map to work correctly
+        self._copy_model_files_for_transformers(save_directory)
+        
+        # Save Transformers-compatible config.json with local file references
         transformers_config = {
             "model_type": "pruning_encoder",
             "mode": self.mode,
@@ -813,11 +830,20 @@ class PruningEncoder(nn.Module):
             "architectures": [
                 "PruningEncoderForSequenceClassification" if self.mode == "reranking_pruning" 
                 else "PruningEncoderForTokenClassification"
-            ]
+            ],
+            "auto_map": {
+                "AutoConfig": "modeling_pruning_encoder.PruningEncoderConfig",
+                "AutoModelForSequenceClassification": "modeling_pruning_encoder.PruningEncoderForSequenceClassification" if self.mode == "reranking_pruning" else None,
+                "AutoModelForTokenClassification": "modeling_pruning_encoder.PruningEncoderForTokenClassification" if self.mode == "pruning_only" else None,
+            }
         }
+        
+        # Remove None values from auto_map
+        transformers_config["auto_map"] = {k: v for k, v in transformers_config["auto_map"].items() if v is not None}
         
         with open(save_directory / "config.json", "w") as f:
             json.dump(transformers_config, f, indent=2)
+        
         
         # Save models based on mode
         if self.mode == "reranking_pruning":
