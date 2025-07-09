@@ -789,8 +789,8 @@ class PruningEncoder(nn.Module):
         save_directory = Path(save_directory)
         save_directory.mkdir(parents=True, exist_ok=True)
         
-        # Save config
-        config_dict = {
+        # Save PruningEncoder-specific config
+        pruning_encoder_config = {
             "model_name_or_path": self.model_name_or_path,
             "mode": self.mode,  # Save mode
             "num_labels": self.num_labels,
@@ -799,8 +799,25 @@ class PruningEncoder(nn.Module):
             "architecture": "PruningEncoder"
         }
         
+        with open(save_directory / "pruning_encoder_config.json", "w") as f:
+            json.dump(pruning_encoder_config, f, indent=2)
+        
+        # Save Transformers-compatible config.json
+        transformers_config = {
+            "model_type": "pruning_encoder",
+            "mode": self.mode,
+            "base_model_name_or_path": self.model_name_or_path,
+            "pruning_config": self.pruning_head.config.to_dict(),
+            "max_length": self.max_length,
+            "num_labels": 1 if self.mode == "reranking_pruning" else 2,
+            "architectures": [
+                "PruningEncoderForSequenceClassification" if self.mode == "reranking_pruning" 
+                else "PruningEncoderForTokenClassification"
+            ]
+        }
+        
         with open(save_directory / "config.json", "w") as f:
-            json.dump(config_dict, f, indent=2)
+            json.dump(transformers_config, f, indent=2)
         
         # Save models based on mode
         if self.mode == "reranking_pruning":
@@ -811,6 +828,9 @@ class PruningEncoder(nn.Module):
             # Save encoder model
             self.encoder.save_pretrained(save_directory / "encoder_model")
             self.tokenizer.save_pretrained(save_directory / "encoder_model")
+        
+        # Also save tokenizer at root for Transformers compatibility
+        self.tokenizer.save_pretrained(save_directory)
         
         # Save pruning head
         self.pruning_head.save_pretrained(save_directory / "pruning_head")
@@ -825,9 +845,13 @@ class PruningEncoder(nn.Module):
         """Load a pretrained PruningEncoder."""
         model_path = Path(model_name_or_path)
         
-        # Load config
-        with open(model_path / "config.json", "r") as f:
-            config = json.load(f)
+        # Load config - try PruningEncoder config first, then Transformers config
+        if (model_path / "pruning_encoder_config.json").exists():
+            with open(model_path / "pruning_encoder_config.json", "r") as f:
+                config = json.load(f)
+        else:
+            with open(model_path / "config.json", "r") as f:
+                config = json.load(f)
         
         # Get mode (default to reranking_pruning for backward compatibility)
         mode = config.get("mode", "reranking_pruning")

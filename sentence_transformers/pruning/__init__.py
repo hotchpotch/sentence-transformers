@@ -11,13 +11,40 @@ from .trainer import PruningTrainer
 from .losses import PruningLoss
 from .data_collator import PruningDataCollator
 
-__all__ = [
-    "PruningConfig",
-    "RerankingPruningOutput", 
-    "PruningOutput",
-    "PruningOnlyOutput",
-    "PruningEncoder",
-    "PruningTrainer",
-    "PruningLoss",
-    "PruningDataCollator"
-]
+# Import Transformers compatibility components
+try:
+    from .transformers_compat import (
+        PruningEncoderConfig,
+        PruningEncoderForSequenceClassification,
+        PruningEncoderForTokenClassification,
+        register_auto_models
+    )
+    
+    # Register models with Transformers AutoModel
+    register_auto_models()
+    
+    __all__ = [
+        "PruningConfig",
+        "RerankingPruningOutput", 
+        "PruningOutput",
+        "PruningOnlyOutput",
+        "PruningEncoder",
+        "PruningTrainer",
+        "PruningLoss",
+        "PruningDataCollator",
+        "PruningEncoderConfig",
+        "PruningEncoderForSequenceClassification",
+        "PruningEncoderForTokenClassification"
+    ]
+except ImportError:
+    # Transformers compatibility not available
+    __all__ = [
+        "PruningConfig",
+        "RerankingPruningOutput", 
+        "PruningOutput",
+        "PruningOnlyOutput",
+        "PruningEncoder",
+        "PruningTrainer",
+        "PruningLoss",
+        "PruningDataCollator"
+    ]
