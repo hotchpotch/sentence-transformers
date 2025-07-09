@@ -9,6 +9,7 @@
 - 2025-01-09: Provence → Pruning リネーム、pruning-onlyモード実装
 - 2025-01-09: デュアルモードアーキテクチャ完成、F2評価結果更新、両モード対応のデータ構造実装
 - 2025-01-09: 全6モデル学習完了（pruning-only×3、reranking+pruning×3）、包括的な性能比較実施
+- 2025-01-09: Transformers互換性実装完了、5つの読み込み方法対応
 
 ## 概要
 
@@ -45,6 +46,9 @@ Sentence TransformersにProvence論文ベースのtext-pruner機能を実装す�
 - [x] 全テストセット完全評価（F2スコア最適化）
 - [x] 6モデル性能比較（pruning-only vs reranking+pruning）
 - [x] gradient_accumulation_stepsのバグ発見・修正
+- [x] Transformers互換性実装（AutoModel対応）
+- [x] CrossEncoder互換性確認
+- [x] trust_remote_code不要の自動登録機能
 - [ ] ドキュメント作成（API仕様等）
 - [ ] PR作成
 
@@ -225,11 +229,52 @@ class PruningLoss(nn.Module):
         """
 ```
 
+## Transformers互換性（実装済み）
+
+### 5つの読み込み方法
+
+1. **フルPruningEncoder（完全機能）**
+```python
+from sentence_transformers.pruning import PruningEncoder
+model = PruningEncoder.from_pretrained("path/to/model")
+```
+
+2. **ベースモデルのみ（特別なインポート不要）**
+```python
+from transformers import AutoModelForSequenceClassification
+model = AutoModelForSequenceClassification.from_pretrained("path/to/model/ranking_model")
+```
+
+3. **AutoModel + 自動登録**
+```python
+import sentence_transformers  # 自動登録
+from transformers import AutoModelForSequenceClassification
+model = AutoModelForSequenceClassification.from_pretrained("path/to/model")
+```
+
+4. **CrossEncoder互換**
+```python
+from sentence_transformers import CrossEncoder
+model = CrossEncoder("path/to/model")
+```
+
+5. **trust_remote_code**
+```python
+from transformers import AutoModelForSequenceClassification
+model = AutoModelForSequenceClassification.from_pretrained("path/to/model", trust_remote_code=True)
+```
+
+### 実装詳細
+
+- `transformers_compat.py`: Transformers互換性ラッパークラス
+- `modeling_pruning_encoder.py`: auto_map用スタンドアロン実装
+- 自動登録: `sentence_transformers.__init__.py`で自動インポート
+- ベースモデル: `/ranking_model`サブディレクトリに完全なTransformersモデルとして保存
+
 ## 今後の課題
 
-1. **Transformersライブラリ互換性**: AutoModelForSequenceClassification/TokenClassificationでのロード対応
-2. **ドキュメント作成**: API仕様、使用例、ベンチマーク結果
-3. **PR準備**: コミュニティへの貢献準備
+1. **ドキュメント作成**: API仕様、使用例、ベンチマーク結果
+2. **PR準備**: コミュニティへの貢献準備
 
 ## 参考
 

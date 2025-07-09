@@ -132,6 +132,12 @@ uv run python tmp/sample.py   # tmpディレクトリのサンプルコード実
 - 重要な発見:
   - Reranking+Pruningは特にPOSサンプルで+9-13%の改善
   - gradient_accumulation_stepsがtrainer.pyで正しく反映されない問題を発見
+- Transformers互換性実装完了（2025年1月9日）:
+  - AutoModelForSequenceClassification/TokenClassificationでのロード対応
+  - CrossEncoder互換性（既存のCrossEncoderとして使用可能）
+  - trust_remote_code不要の自動登録機能
+  - ベースモデルの直接利用（/ranking_modelサブディレクトリ）
+  - 5つの読み込み方法すべてで動作確認
 
 ### 仕様書管理
 
