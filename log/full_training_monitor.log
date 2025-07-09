@@ -1,0 +1,32 @@
+Waiting for small training to complete...
+Small training still running... waiting 30 seconds
+Small training still running... waiting 30 seconds
+Small training still running... waiting 30 seconds
+Small training still running... waiting 30 seconds
+Small training still running... waiting 30 seconds
+Small training still running... waiting 30 seconds
+Small training still running... waiting 30 seconds
+Small training still running... waiting 30 seconds
+Small training still running... waiting 30 seconds
+Small training still running... waiting 30 seconds
+Small training still running... waiting 30 seconds
+Small training still running... waiting 30 seconds
+Small training still running... waiting 30 seconds
+Small training still running... waiting 30 seconds
+Small training still running... waiting 30 seconds
+Small training still running... waiting 30 seconds
+Small training still running... waiting 30 seconds
+Small training still running... waiting 30 seconds
+Small training still running... waiting 30 seconds
+Small training still running... waiting 30 seconds
+Small training still running... waiting 30 seconds
+Small training still running... waiting 30 seconds
+Small training still running... waiting 30 seconds
+Small training still running... waiting 30 seconds
+Small training still running... waiting 30 seconds
+Small training still running... waiting 30 seconds
+Small training completed!
+Waiting 30 seconds for GPU memory to be freed...
+Starting full training...
+Full training started. Log: ./log/train_pruning_only_full_background_1752019289.log
+Full training monitor completed!

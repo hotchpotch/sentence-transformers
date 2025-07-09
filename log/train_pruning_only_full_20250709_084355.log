@@ -1,0 +1,18 @@
+2025-07-09 08:43:55,221 - __main__ - INFO - Starting pruning-only training with full dataset
+2025-07-09 08:43:55,222 - __main__ - INFO - Loading dataset: hotchpotch/wip-query-context-pruner-with-teacher-scores/ja-full
+2025-07-09 08:44:00,163 - __main__ - INFO - Train dataset size: 500298
+2025-07-09 08:44:00,163 - __main__ - INFO - Eval dataset size: 2999
+2025-07-09 08:44:00,164 - __main__ - INFO - Dataset columns: ['id', 'query', 'texts', 'chunks_pos', 'labels', 'dataset_name', 'relevant_chunks', 'teacher_scores_japanese-reranker-xsmall-v2']
+2025-07-09 08:44:00,164 - __main__ - INFO - Initializing PruningEncoder in pruning_only mode with base model: cl-nagoya/ruri-v3-30m
+2025-07-09 08:44:02,811 - __main__ - INFO - Training arguments: {'output_dir': './output/pruning_only_full_20250709_084402', 'num_epochs': 3, 'batch_size': 64, 'learning_rate': 2e-05, 'warmup_ratio': 0.1, 'weight_decay': 0.01, 'gradient_accumulation_steps': 1, 'max_grad_norm': 1.0, 'logging_steps': 100, 'eval_steps': 1000, 'save_steps': 1000, 'save_total_limit': 3, 'seed': 42, 'fp16': True, 'dataloader_num_workers': 4}
+2025-07-09 08:44:02,813 - __main__ - INFO - Starting training...
+2025-07-09 08:44:02,813 - sentence_transformers.pruning.trainer - INFO - ***** Running training *****
+2025-07-09 08:44:02,813 - sentence_transformers.pruning.trainer - INFO -   Num examples = 500298
+2025-07-09 08:44:02,813 - sentence_transformers.pruning.trainer - INFO -   Num epochs = 3
+2025-07-09 08:44:02,813 - sentence_transformers.pruning.trainer - INFO -   Batch size = 64
+2025-07-09 08:44:02,813 - sentence_transformers.pruning.trainer - INFO -   Gradient accumulation steps = 1
+2025-07-09 08:44:02,813 - sentence_transformers.pruning.trainer - INFO -   Total optimization steps = 23454
+2025-07-09 08:44:02,945 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:44:02,948 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:44:02,948 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:44:02,952 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode

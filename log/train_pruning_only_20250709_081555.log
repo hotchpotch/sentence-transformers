@@ -1,0 +1,139 @@
+2025-07-09 08:15:55,963 - __main__ - INFO - Starting pruning-only training with minimal dataset
+2025-07-09 08:15:55,963 - __main__ - INFO - Loading dataset: hotchpotch/wip-query-context-pruner-with-teacher-scores/ja-minimal
+2025-07-09 08:16:00,679 - __main__ - INFO - Train dataset size: 9881
+2025-07-09 08:16:00,679 - __main__ - INFO - Eval dataset size: 59
+2025-07-09 08:16:00,679 - __main__ - INFO - Dataset columns: ['id', 'query', 'texts', 'chunks_pos', 'labels', 'dataset_name', 'relevant_chunks', 'teacher_scores_japanese-reranker-xsmall-v2']
+2025-07-09 08:16:00,679 - __main__ - INFO - Initializing PruningEncoder in pruning_only mode with base model: cl-nagoya/ruri-v3-30m
+2025-07-09 08:16:03,154 - __main__ - INFO - Training arguments: {'output_dir': './output/pruning_only_minimal_20250709_081603', 'num_epochs': 3, 'batch_size': 16, 'learning_rate': 2e-05, 'warmup_ratio': 0.1, 'weight_decay': 0.01, 'gradient_accumulation_steps': 1, 'max_grad_norm': 1.0, 'logging_steps': 50, 'eval_steps': 100, 'save_steps': 100, 'save_total_limit': 3, 'seed': 42, 'fp16': True, 'dataloader_num_workers': 4}
+2025-07-09 08:16:03,155 - __main__ - INFO - Starting training...
+2025-07-09 08:16:03,155 - sentence_transformers.pruning.trainer - INFO - ***** Running training *****
+2025-07-09 08:16:03,155 - sentence_transformers.pruning.trainer - INFO -   Num examples = 9881
+2025-07-09 08:16:03,156 - sentence_transformers.pruning.trainer - INFO -   Num epochs = 3
+2025-07-09 08:16:03,156 - sentence_transformers.pruning.trainer - INFO -   Batch size = 16
+2025-07-09 08:16:03,156 - sentence_transformers.pruning.trainer - INFO -   Gradient accumulation steps = 1
+2025-07-09 08:16:03,156 - sentence_transformers.pruning.trainer - INFO -   Total optimization steps = 1854
+2025-07-09 08:16:03,250 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:16:03,252 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:16:03,252 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:16:03,252 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:16:07,735 - sentence_transformers.pruning.trainer - INFO - Step 50, Loss: 0.4124
+2025-07-09 08:16:11,536 - sentence_transformers.pruning.trainer - INFO - Step 100, Loss: 0.2564
+2025-07-09 08:16:11,536 - sentence_transformers.pruning.trainer - INFO - Running evaluation...
+2025-07-09 08:16:11,665 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:16:11,670 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:16:12,078 - sentence_transformers.pruning.trainer - INFO - Eval loss: 0.0836
+2025-07-09 08:16:12,371 - sentence_transformers.pruning.trainer - INFO - New best model saved to ./output/pruning_only_minimal_20250709_081603/checkpoint-100-best
+2025-07-09 08:16:12,371 - sentence_transformers.pruning.trainer - INFO - Saving checkpoint to ./output/pruning_only_minimal_20250709_081603/checkpoint-100
+2025-07-09 08:16:16,453 - sentence_transformers.pruning.trainer - INFO - Step 150, Loss: 0.1981
+2025-07-09 08:16:20,264 - sentence_transformers.pruning.trainer - INFO - Step 200, Loss: 0.1662
+2025-07-09 08:16:20,264 - sentence_transformers.pruning.trainer - INFO - Running evaluation...
+2025-07-09 08:16:20,390 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:16:20,390 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:16:20,803 - sentence_transformers.pruning.trainer - INFO - Eval loss: 0.0713
+2025-07-09 08:16:21,087 - sentence_transformers.pruning.trainer - INFO - New best model saved to ./output/pruning_only_minimal_20250709_081603/checkpoint-200-best
+2025-07-09 08:16:21,088 - sentence_transformers.pruning.trainer - INFO - Saving checkpoint to ./output/pruning_only_minimal_20250709_081603/checkpoint-200
+2025-07-09 08:16:25,175 - sentence_transformers.pruning.trainer - INFO - Step 250, Loss: 0.1459
+2025-07-09 08:16:28,983 - sentence_transformers.pruning.trainer - INFO - Step 300, Loss: 0.1313
+2025-07-09 08:16:28,983 - sentence_transformers.pruning.trainer - INFO - Running evaluation...
+2025-07-09 08:16:29,104 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:16:29,104 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:16:29,516 - sentence_transformers.pruning.trainer - INFO - Eval loss: 0.0639
+2025-07-09 08:16:29,795 - sentence_transformers.pruning.trainer - INFO - New best model saved to ./output/pruning_only_minimal_20250709_081603/checkpoint-300-best
+2025-07-09 08:16:29,795 - sentence_transformers.pruning.trainer - INFO - Saving checkpoint to ./output/pruning_only_minimal_20250709_081603/checkpoint-300
+2025-07-09 08:16:33,881 - sentence_transformers.pruning.trainer - INFO - Step 350, Loss: 0.1210
+2025-07-09 08:16:37,685 - sentence_transformers.pruning.trainer - INFO - Step 400, Loss: 0.1126
+2025-07-09 08:16:37,685 - sentence_transformers.pruning.trainer - INFO - Running evaluation...
+2025-07-09 08:16:37,809 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:16:37,809 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:16:38,200 - sentence_transformers.pruning.trainer - INFO - Eval loss: 0.0596
+2025-07-09 08:16:38,495 - sentence_transformers.pruning.trainer - INFO - New best model saved to ./output/pruning_only_minimal_20250709_081603/checkpoint-400-best
+2025-07-09 08:16:38,496 - sentence_transformers.pruning.trainer - INFO - Saving checkpoint to ./output/pruning_only_minimal_20250709_081603/checkpoint-400
+2025-07-09 08:16:38,793 - sentence_transformers.pruning.trainer - INFO - Deleting checkpoint output/pruning_only_minimal_20250709_081603/checkpoint-100
+2025-07-09 08:16:42,622 - sentence_transformers.pruning.trainer - INFO - Step 450, Loss: 0.1066
+2025-07-09 08:16:46,417 - sentence_transformers.pruning.trainer - INFO - Step 500, Loss: 0.1015
+2025-07-09 08:16:46,417 - sentence_transformers.pruning.trainer - INFO - Running evaluation...
+2025-07-09 08:16:46,540 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:16:46,540 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:16:46,937 - sentence_transformers.pruning.trainer - INFO - Eval loss: 0.0562
+2025-07-09 08:16:47,231 - sentence_transformers.pruning.trainer - INFO - New best model saved to ./output/pruning_only_minimal_20250709_081603/checkpoint-500-best
+2025-07-09 08:16:47,231 - sentence_transformers.pruning.trainer - INFO - Saving checkpoint to ./output/pruning_only_minimal_20250709_081603/checkpoint-500
+2025-07-09 08:16:47,514 - sentence_transformers.pruning.trainer - INFO - Deleting checkpoint output/pruning_only_minimal_20250709_081603/checkpoint-200
+2025-07-09 08:16:51,352 - sentence_transformers.pruning.trainer - INFO - Step 550, Loss: 0.0971
+2025-07-09 08:16:55,155 - sentence_transformers.pruning.trainer - INFO - Step 600, Loss: 0.0933
+2025-07-09 08:16:55,155 - sentence_transformers.pruning.trainer - INFO - Running evaluation...
+2025-07-09 08:16:55,278 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:16:55,279 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:16:55,676 - sentence_transformers.pruning.trainer - INFO - Eval loss: 0.0572
+2025-07-09 08:16:55,676 - sentence_transformers.pruning.trainer - INFO - Saving checkpoint to ./output/pruning_only_minimal_20250709_081603/checkpoint-600
+2025-07-09 08:16:55,962 - sentence_transformers.pruning.trainer - INFO - Deleting checkpoint output/pruning_only_minimal_20250709_081603/checkpoint-300
+2025-07-09 08:16:57,395 - sentence_transformers.pruning.trainer - INFO - Running evaluation...
+2025-07-09 08:16:57,517 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:16:57,518 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:16:57,933 - sentence_transformers.pruning.trainer - INFO - Eval loss: 0.0557
+2025-07-09 08:16:58,229 - sentence_transformers.pruning.trainer - INFO - New best model saved to ./output/pruning_only_minimal_20250709_081603/checkpoint-618-best
+2025-07-09 08:16:58,229 - sentence_transformers.pruning.trainer - INFO - Saving checkpoint to ./output/pruning_only_minimal_20250709_081603/checkpoint-618
+2025-07-09 08:16:58,515 - sentence_transformers.pruning.trainer - INFO - Deleting checkpoint output/pruning_only_minimal_20250709_081603/checkpoint-400
+2025-07-09 08:16:58,673 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:16:58,673 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:16:58,673 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:16:58,675 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:17:01,296 - sentence_transformers.pruning.trainer - INFO - Step 650, Loss: 0.0403
+2025-07-09 08:17:05,101 - sentence_transformers.pruning.trainer - INFO - Step 700, Loss: 0.0415
+2025-07-09 08:17:05,101 - sentence_transformers.pruning.trainer - INFO - Running evaluation...
+2025-07-09 08:17:05,228 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:17:05,230 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:17:05,616 - sentence_transformers.pruning.trainer - INFO - Eval loss: 0.0559
+2025-07-09 08:17:05,617 - sentence_transformers.pruning.trainer - INFO - Saving checkpoint to ./output/pruning_only_minimal_20250709_081603/checkpoint-700
+2025-07-09 08:17:05,902 - sentence_transformers.pruning.trainer - INFO - Deleting checkpoint output/pruning_only_minimal_20250709_081603/checkpoint-500
+2025-07-09 08:17:09,742 - sentence_transformers.pruning.trainer - INFO - Step 750, Loss: 0.0418
+2025-07-09 08:17:13,548 - sentence_transformers.pruning.trainer - INFO - Step 800, Loss: 0.0408
+2025-07-09 08:17:13,548 - sentence_transformers.pruning.trainer - INFO - Running evaluation...
+2025-07-09 08:17:13,673 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:17:13,674 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:17:14,092 - sentence_transformers.pruning.trainer - INFO - Eval loss: 0.0564
+2025-07-09 08:17:14,092 - sentence_transformers.pruning.trainer - INFO - Saving checkpoint to ./output/pruning_only_minimal_20250709_081603/checkpoint-800
+2025-07-09 08:17:14,390 - sentence_transformers.pruning.trainer - INFO - Deleting checkpoint output/pruning_only_minimal_20250709_081603/checkpoint-600
+2025-07-09 08:17:18,225 - sentence_transformers.pruning.trainer - INFO - Step 850, Loss: 0.0412
+2025-07-09 08:17:22,017 - sentence_transformers.pruning.trainer - INFO - Step 900, Loss: 0.0406
+2025-07-09 08:17:22,018 - sentence_transformers.pruning.trainer - INFO - Running evaluation...
+2025-07-09 08:17:22,141 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:17:22,143 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:17:22,538 - sentence_transformers.pruning.trainer - INFO - Eval loss: 0.0534
+2025-07-09 08:17:22,835 - sentence_transformers.pruning.trainer - INFO - New best model saved to ./output/pruning_only_minimal_20250709_081603/checkpoint-900-best
+2025-07-09 08:17:22,835 - sentence_transformers.pruning.trainer - INFO - Saving checkpoint to ./output/pruning_only_minimal_20250709_081603/checkpoint-900
+2025-07-09 08:17:23,123 - sentence_transformers.pruning.trainer - INFO - Deleting checkpoint output/pruning_only_minimal_20250709_081603/checkpoint-618
+2025-07-09 08:17:26,950 - sentence_transformers.pruning.trainer - INFO - Step 950, Loss: 0.0408
+2025-07-09 08:17:30,740 - sentence_transformers.pruning.trainer - INFO - Step 1000, Loss: 0.0407
+2025-07-09 08:17:30,740 - sentence_transformers.pruning.trainer - INFO - Running evaluation...
+2025-07-09 08:17:30,866 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:17:30,867 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:17:31,280 - sentence_transformers.pruning.trainer - INFO - Eval loss: 0.0536
+2025-07-09 08:17:31,281 - sentence_transformers.pruning.trainer - INFO - Saving checkpoint to ./output/pruning_only_minimal_20250709_081603/checkpoint-1000
+2025-07-09 08:17:31,586 - sentence_transformers.pruning.trainer - INFO - Deleting checkpoint output/pruning_only_minimal_20250709_081603/checkpoint-700
+2025-07-09 08:17:35,415 - sentence_transformers.pruning.trainer - INFO - Step 1050, Loss: 0.0404
+2025-07-09 08:17:39,219 - sentence_transformers.pruning.trainer - INFO - Step 1100, Loss: 0.0402
+2025-07-09 08:17:39,219 - sentence_transformers.pruning.trainer - INFO - Running evaluation...
+2025-07-09 08:17:39,343 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:17:39,343 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:17:39,751 - sentence_transformers.pruning.trainer - INFO - Eval loss: 0.0538
+2025-07-09 08:17:39,752 - sentence_transformers.pruning.trainer - INFO - Saving checkpoint to ./output/pruning_only_minimal_20250709_081603/checkpoint-1100
+2025-07-09 08:17:40,048 - sentence_transformers.pruning.trainer - INFO - Deleting checkpoint output/pruning_only_minimal_20250709_081603/checkpoint-800
+2025-07-09 08:17:43,876 - sentence_transformers.pruning.trainer - INFO - Step 1150, Loss: 0.0401
+2025-07-09 08:17:47,670 - sentence_transformers.pruning.trainer - INFO - Step 1200, Loss: 0.0401
+2025-07-09 08:17:47,671 - sentence_transformers.pruning.trainer - INFO - Running evaluation...
+2025-07-09 08:17:47,796 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:17:47,796 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:17:48,217 - sentence_transformers.pruning.trainer - INFO - Eval loss: 0.0530
+2025-07-09 08:17:48,517 - sentence_transformers.pruning.trainer - INFO - New best model saved to ./output/pruning_only_minimal_20250709_081603/checkpoint-1200-best
+2025-07-09 08:17:48,518 - sentence_transformers.pruning.trainer - INFO - Saving checkpoint to ./output/pruning_only_minimal_20250709_081603/checkpoint-1200
+2025-07-09 08:17:48,804 - sentence_transformers.pruning.trainer - INFO - Deleting checkpoint output/pruning_only_minimal_20250709_081603/checkpoint-900
+2025-07-09 08:17:51,618 - sentence_transformers.pruning.trainer - INFO - Running evaluation...
+2025-07-09 08:17:51,744 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:17:51,744 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:17:52,136 - sentence_transformers.pruning.trainer - INFO - Eval loss: 0.0532
+2025-07-09 08:17:52,137 - sentence_transformers.pruning.trainer - INFO - Saving checkpoint to ./output/pruning_only_minimal_20250709_081603/checkpoint-1236
+2025-07-09 08:17:52,441 - sentence_transformers.pruning.trainer - INFO - Deleting checkpoint output/pruning_only_minimal_20250709_081603/checkpoint-1000
+2025-07-09 08:17:52,603 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:17:52,603 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:17:52,604 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode
+2025-07-09 08:17:52,605 - sentence_transformers.pruning.data_collator - INFO - Note: 'labels' column found but will be ignored in pruning_only mode

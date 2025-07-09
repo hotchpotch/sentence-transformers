@@ -110,7 +110,7 @@ class PruningTrainer:
         # Scheduler
         if scheduler is None and self.training_args["warmup_ratio"] > 0:
             num_training_steps = (
-                len(self.train_dataset) // self.training_args["batch_size"] 
+                len(self.train_dataset) // (self.training_args["batch_size"] * self.training_args.get("gradient_accumulation_steps", 1))
                 * self.training_args["num_epochs"]
             )
             num_warmup_steps = int(num_training_steps * self.training_args["warmup_ratio"])
@@ -166,7 +166,7 @@ class PruningTrainer:
         logger.info(f"  Num epochs = {self.training_args['num_epochs']}")
         logger.info(f"  Batch size = {self.training_args['batch_size']}")
         logger.info(f"  Gradient accumulation steps = {self.training_args['gradient_accumulation_steps']}")
-        logger.info(f"  Total optimization steps = {len(train_dataloader) * self.training_args['num_epochs']}")
+        logger.info(f"  Total optimization steps = {len(train_dataloader) // self.training_args.get('gradient_accumulation_steps', 1) * self.training_args['num_epochs']}")
         
         # Enable mixed precision if requested
         scaler = None

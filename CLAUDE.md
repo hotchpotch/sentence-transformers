@@ -120,13 +120,18 @@ uv run python tmp/sample.py   # tmpディレクトリのサンプルコード実
 - チャンクベース評価: predict_context()メソッドによるチャンク単位の評価
 
 #### 最新の実装状況（2025年1月）
-- 3つのスケールでの学習完了（minimal, small, full）
-- チャンクベース評価システムの実装
-- F2最適化によるRecall重視の閾値調整（誤削除最小化）
-- 最適閾値: トークン0.3、チャンク0.5（F2スコア重視）
-- 性能比較:
-  - ja-smallモデル: 高い汎化性能、NEGデータでも高Recall
-  - ja-fullモデル: 学習データに特化、POSデータで最高性能（Recall 94.4%）
+- デュアルモードアーキテクチャ完成（reranking_pruning + pruning_only）
+- 6つのモデル学習完了:
+  - Pruning-only: minimal/small/full（cl-nagoya/ruri-v3-30m ベース）
+  - Reranking+Pruning: minimal/small/full（japanese-reranker-xsmall-v2 ベース）
+- 最適閾値: 0.3（すべてのモデルで最高F2スコア）
+- 性能比較（F2スコア）:
+  - Pruning-only full: 0.7516
+  - Reranking+Pruning small: 0.7823（最良のバランス）
+  - Reranking+Pruning full: 0.7647
+- 重要な発見:
+  - Reranking+Pruningは特にPOSサンプルで+9-13%の改善
+  - gradient_accumulation_stepsがtrainer.pyで正しく反映されない問題を発見
 
 ### 仕様書管理
 
