@@ -44,6 +44,13 @@ if importlib.util.find_spec("codecarbon") and "CODECARBON_LOG_LEVEL" not in os.e
 # Globally silence PyTorch sparse CSR tensor beta warning
 warnings.filterwarnings("ignore", message="Sparse CSR tensor support is in beta state")
 
+# Auto-register pruning models for transformers compatibility
+try:
+    import sentence_transformers.pruning
+except ImportError:
+    # Pruning module not available - skip registration
+    pass
+
 __all__ = [
     "LoggingHandler",
     "SentencesDataset",
