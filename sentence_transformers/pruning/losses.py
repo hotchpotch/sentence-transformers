@@ -29,8 +29,8 @@ class PruningLoss(nn.Module):
                  mode: Optional[str] = None,
                  ranking_loss_fn: Optional[nn.Module] = None,
                  pruning_loss_fn: Optional[nn.Module] = None,
-                 ranking_weight: float = 1.0,
-                 pruning_weight: float = 0.5,
+                 ranking_weight: float = 0.05,
+                 pruning_weight: float = 1.0,
                  is_regression: bool = True):
         """
         Args:
@@ -38,8 +38,8 @@ class PruningLoss(nn.Module):
             mode: Operating mode - "reranking_pruning" or "pruning_only" (if None, uses model.mode)
             ranking_loss_fn: Loss function for ranking (default: MSELoss for regression, BCEWithLogitsLoss for classification)
             pruning_loss_fn: Loss function for pruning (default: CrossEntropyLoss)
-            ranking_weight: Weight for ranking loss
-            pruning_weight: Weight for pruning loss
+            ranking_weight: Weight for ranking loss (Provence paper default: 0.05)
+            pruning_weight: Weight for pruning loss (Provence paper default: 1.0)
             is_regression: Whether the ranking task is regression (True) or classification (False)
         """
         super().__init__()
