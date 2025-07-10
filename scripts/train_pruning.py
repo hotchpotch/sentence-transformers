@@ -117,9 +117,17 @@ class DataArguments:
         default=None,
         metadata={"help": "For debugging purposes, truncate the number of evaluation examples"}
     )
-    validation_split: float = field(
-        default=0.1,
-        metadata={"help": "Validation split ratio if no validation set exists"}
+    validation_split: Optional[float] = field(
+        default=None,
+        metadata={"help": "Validation split ratio (0-1). If None, use existing validation set"}
+    )
+    validation_split_samples: Optional[int] = field(
+        default=None,
+        metadata={"help": "Number of validation samples to split. Takes precedence over validation_split ratio"}
+    )
+    validation_split_name: str = field(
+        default="validation",
+        metadata={"help": "Name of the validation split to use (e.g., 'validation', 'test', 'dev')"}
     )
     preprocessing_num_workers: Optional[int] = field(
         default=None,
@@ -198,32 +206,35 @@ def prepare_dataset(
     Load and prepare dataset with teacher scores.
     
     Args:
-        dataset_name: Name of the dataset to load
+        data_args: Data arguments containing dataset info
         teacher_model_name: Name of the teacher model for score column
-        subset: Dataset subset to use
-        max_train_samples: Maximum number of training samples
-        max_eval_samples: Maximum number of evaluation samples
-        validation_split: Split ratio if no validation set exists
         seed: Random seed for splitting
     """
-    # Check if it's a local dataset first
-    subset_name = data_args.subset.replace('msmarco-ja-', '')
-    local_dataset_path = f"tmp/datasets/dev-dataset/{subset_name}-fixed"
-    
-    # Try -fixed variant first, then fallback to base name
-    if os.path.exists(local_dataset_path):
-        logger.info(f"Loading local dataset: {local_dataset_path}")
-        from datasets import load_from_disk
-        dataset = load_from_disk(local_dataset_path)
-    elif os.path.exists(f"tmp/datasets/dev-dataset/{subset_name}"):
-        local_dataset_path = f"tmp/datasets/dev-dataset/{subset_name}"
-        logger.info(f"Loading local dataset: {local_dataset_path}")
-        from datasets import load_from_disk
-        dataset = load_from_disk(local_dataset_path)
-    else:
-        # Load dataset from HuggingFace
+    # Load dataset from HuggingFace first, fallback to local if needed
+    try:
         logger.info(f"Loading dataset: {data_args.dataset_name}:{data_args.subset}")
         dataset = load_dataset(data_args.dataset_name, data_args.subset)
+    except Exception as e:
+        logger.warning(f"Failed to load from HuggingFace: {e}")
+        logger.info("Trying local dataset fallback...")
+        
+        # Fallback to local dataset
+        subset_name = data_args.subset.replace('msmarco-ja-', '')
+        local_paths = [
+            f"tmp/datasets/dev-dataset/{subset_name}-fixed",
+            f"tmp/datasets/dev-dataset/{subset_name}"
+        ]
+        
+        dataset = None
+        for local_path in local_paths:
+            if os.path.exists(local_path):
+                logger.info(f"Loading local dataset: {local_path}")
+                from datasets import load_from_disk
+                dataset = load_from_disk(local_path)
+                break
+        
+        if dataset is None:
+            raise ValueError(f"Could not load dataset {data_args.dataset_name}:{data_args.subset} from HuggingFace or local paths")
     
     # Construct teacher score column name
     teacher_score_column = f"teacher_scores.{teacher_model_name}"
@@ -307,28 +318,51 @@ def prepare_dataset(
     train_dataset = dataset['train'].map(prepare_example)
     
     # Handle validation set
-    if 'validation' in dataset:
+    eval_dataset = None
+    
+    # Try to use existing validation set first (prioritize validation over test)
+    if data_args.validation_split_name in dataset:
+        logger.info(f"Using existing validation set: '{data_args.validation_split_name}'")
+        eval_dataset = dataset[data_args.validation_split_name].map(prepare_example)
+    elif 'validation' in dataset:
+        logger.info("Using existing validation set: 'validation'")
         eval_dataset = dataset['validation'].map(prepare_example)
-    elif 'test' in dataset:
-        eval_dataset = dataset['test'].map(prepare_example)
-    else:
-        # Split training set if no validation set exists
-        logger.info(f"No validation set found. Creating split with {data_args.validation_split:.0%} of training data.")
-        split_dataset = train_dataset.train_test_split(test_size=data_args.validation_split, seed=seed)
-        train_dataset = split_dataset['train']
-        eval_dataset = split_dataset['test']
+    
+    # If no validation set found or split is explicitly specified, create split
+    if eval_dataset is None or data_args.validation_split is not None or data_args.validation_split_samples is not None:
+        if data_args.validation_split_samples is not None:
+            # Use absolute number of samples
+            if data_args.validation_split_samples <= 0 or data_args.validation_split_samples >= len(train_dataset):
+                raise ValueError(f"validation_split_samples must be between 1 and {len(train_dataset)-1}")
+            logger.info(f"Creating validation split with {data_args.validation_split_samples} samples")
+            ratio = data_args.validation_split_samples / len(train_dataset)
+            split_dataset = train_dataset.train_test_split(test_size=ratio, seed=seed)
+            train_dataset = split_dataset['train']
+            eval_dataset = split_dataset['test']
+        elif data_args.validation_split is not None:
+            # Use ratio
+            if not (0 < data_args.validation_split < 1):
+                raise ValueError("validation_split must be between 0 and 1")
+            logger.info(f"Creating validation split with {data_args.validation_split:.0%} of training data")
+            split_dataset = train_dataset.train_test_split(test_size=data_args.validation_split, seed=seed)
+            train_dataset = split_dataset['train']
+            eval_dataset = split_dataset['test']
+        else:
+            # No validation set available and no split specified
+            logger.warning("No validation set found and no validation_split specified. Training without validation.")
+            eval_dataset = None
     
     # Apply sampling if specified
     if data_args.max_train_samples and len(train_dataset) > data_args.max_train_samples:
         logger.info(f"Sampling {data_args.max_train_samples} training examples from {len(train_dataset)}")
         train_dataset = train_dataset.select(range(data_args.max_train_samples))
     
-    if data_args.max_eval_samples and len(eval_dataset) > data_args.max_eval_samples:
+    if eval_dataset is not None and data_args.max_eval_samples and len(eval_dataset) > data_args.max_eval_samples:
         logger.info(f"Sampling {data_args.max_eval_samples} evaluation examples from {len(eval_dataset)}")
         eval_dataset = eval_dataset.select(range(data_args.max_eval_samples))
     
     logger.info(f"Train samples: {len(train_dataset)}")
-    logger.info(f"Validation samples: {len(eval_dataset)}")
+    logger.info(f"Validation samples: {len(eval_dataset) if eval_dataset is not None else 0}")
     
     return train_dataset, eval_dataset
 
@@ -430,7 +464,18 @@ def parse_config_file(config_file: str) -> Tuple[ModelArguments, DataArguments, 
     )
     
     # Extract data arguments
-    data_args = DataArguments()
+    data_config = config.get('data_args', {})
+    data_args = DataArguments(
+        dataset_name=data_config.get('dataset_name', 'hotchpotch/wip-msmarco-context-relevance'),
+        subset=data_config.get('subset', 'msmarco-ja-minimal'),
+        teacher_model_name=data_config.get('teacher_model_name', None),
+        max_train_samples=data_config.get('max_train_samples', None),
+        max_eval_samples=data_config.get('max_eval_samples', None),
+        validation_split=data_config.get('validation_split', None),
+        validation_split_samples=data_config.get('validation_split_samples', None),
+        validation_split_name=data_config.get('validation_split_name', 'validation'),
+        preprocessing_num_workers=data_config.get('preprocessing_num_workers', None)
+    )
     
     # Extract training arguments
     training_config = config.get('training_args', {})
@@ -483,27 +528,81 @@ def main():
     # Parse arguments - either from command line or config files
     parser = HfArgumentParser((ModelArguments, DataArguments, PruningTrainingArguments))
     
-    if len(sys.argv) == 2 and sys.argv[1].endswith((".yaml", ".yml")):
-        # If we pass only one argument and it's a yaml file, parse it
-        model_args, data_args, training_args = parse_config_file(sys.argv[1])
-    elif len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
-        # If we pass only one argument and it's a json file, parse it
-        model_args, data_args, training_args = parser.parse_json_file(json_file=sys.argv[1])
+    # Check if first argument is a config file
+    config_file_arg = None
+    if len(sys.argv) >= 2 and sys.argv[1].endswith((".yaml", ".yml", ".json")):
+        config_file_arg = sys.argv[1]
+        # Remove config file from argv to parse remaining args
+        remaining_args = sys.argv[2:]
     else:
-        # Otherwise parse from command line
-        model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+        remaining_args = sys.argv[1:]
+    
+    if config_file_arg:
+        # Parse config file first
+        print(f"Loading configuration from: {config_file_arg}")
+        if config_file_arg.endswith(".json"):
+            model_args, data_args, training_args = parser.parse_json_file(json_file=config_file_arg)
+        else:
+            model_args, data_args, training_args = parse_config_file(config_file_arg)
         
-        # Handle legacy config file argument
-        if "--config" in sys.argv:
-            config_idx = sys.argv.index("--config")
-            if config_idx + 1 < len(sys.argv):
-                config_file = sys.argv[config_idx + 1]
-                # Override with values from config file
-                config_model_args, config_data_args, config_training_args = parse_config_file(config_file)
-                # Merge configurations (command line takes precedence)
-                for field in model_args.__dataclass_fields__:
-                    if getattr(model_args, field) == model_args.__dataclass_fields__[field].default:
-                        setattr(model_args, field, getattr(config_model_args, field))
+        # Parse remaining command line arguments to override config
+        if remaining_args:
+            # Create temporary argv for remaining args
+            temp_argv = [sys.argv[0]] + remaining_args
+            original_argv = sys.argv
+            sys.argv = temp_argv
+            try:
+                override_model_args, override_data_args, override_training_args = parser.parse_args_into_dataclasses()
+                
+                # Override config values with command line values (only non-default values)
+                overrides = []
+                
+                for field_name in model_args.__dataclass_fields__:
+                    override_value = getattr(override_model_args, field_name)
+                    default_value = model_args.__dataclass_fields__[field_name].default
+                    # Handle special case for required fields that don't have real defaults
+                    if field_name == 'model_name_or_path' and hasattr(override_model_args, field_name):
+                        # Always override model_name_or_path if provided
+                        old_value = getattr(model_args, field_name)
+                        if old_value != override_value:
+                            setattr(model_args, field_name, override_value)
+                            overrides.append(f"model_args.{field_name}: {old_value} → {override_value}")
+                    elif override_value != default_value:
+                        old_value = getattr(model_args, field_name)
+                        setattr(model_args, field_name, override_value)
+                        overrides.append(f"model_args.{field_name}: {old_value} → {override_value}")
+                
+                for field_name in data_args.__dataclass_fields__:
+                    override_value = getattr(override_data_args, field_name)
+                    default_value = data_args.__dataclass_fields__[field_name].default
+                    if override_value != default_value:
+                        old_value = getattr(data_args, field_name)
+                        setattr(data_args, field_name, override_value)
+                        overrides.append(f"data_args.{field_name}: {old_value} → {override_value}")
+                
+                for field_name in training_args.__dataclass_fields__:
+                    override_value = getattr(override_training_args, field_name)
+                    default_value = training_args.__dataclass_fields__[field_name].default
+                    if override_value != default_value:
+                        old_value = getattr(training_args, field_name)
+                        setattr(training_args, field_name, override_value)
+                        overrides.append(f"training_args.{field_name}: {old_value} → {override_value}")
+                
+                # Log overrides
+                if overrides:
+                    print("Command line overrides:")
+                    for override in overrides:
+                        print(f"  {override}")
+                else:
+                    print("No command line overrides applied.")
+                        
+            finally:
+                sys.argv = original_argv
+        else:
+            print("Using configuration file settings.")
+    else:
+        # No config file, parse command line only
+        model_args, data_args, training_args = parser.parse_args_into_dataclasses()
     
     # Setup logging
     logging.basicConfig(

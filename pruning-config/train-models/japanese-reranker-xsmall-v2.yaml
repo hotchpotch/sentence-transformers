@@ -2,6 +2,11 @@ model_args:
   model_name_or_path: "hotchpotch/japanese-reranker-xsmall-v2"
   classifier_dropout: 0.0
 
+data_args:
+  dataset_name: "hotchpotch/wip-msmarco-context-relevance"
+  subset: "msmarco-ja-minimal"
+  teacher_model_name: "japanese-reranker-xsmall-v2"
+
 training_args:
   overwrite_output_dir: true
   optimizer: "adafactor"
