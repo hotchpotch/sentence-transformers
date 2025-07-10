@@ -78,6 +78,7 @@ tmp
 /tmp_trainer/
 /outputs/
 /output/
+/trainer_output/
 /results/
 /log/
 
