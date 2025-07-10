@@ -68,6 +68,8 @@ venv/
 *.pyc
 *.gz
 *.tsv
+
+
 tmp_*.py
 nr_*/
 wandb
@@ -82,3 +84,6 @@ tmp
 /results/
 /log/
 /logs/
+tmp/
+log/
+logs/
