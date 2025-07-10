@@ -168,11 +168,11 @@ class PruningLoss(nn.Module):
         if len(ranking_logits) == 0:
             return None
         
-        # Compute loss
+        # Compute loss - Provence paper uses raw MSE without sigmoid
         if self.is_regression:
-            # Regression with sigmoid activation (for teacher score distillation)
-            ranking_probs = torch.sigmoid(ranking_logits)
-            loss = self.ranking_loss_fn(ranking_probs, target_tensor)
+            # Direct MSE loss as per Provence paper: (s_n - z_{n,0})^2
+            # No sigmoid activation to match paper implementation
+            loss = self.ranking_loss_fn(ranking_logits, target_tensor)
         else:
             # Binary classification
             loss = self.ranking_loss_fn(ranking_logits, target_tensor)
