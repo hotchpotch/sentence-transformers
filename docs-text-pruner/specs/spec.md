@@ -54,7 +54,7 @@ Sentence TransformersにProvence論文ベースのtext-pruner機能を実装す�
 
 ### 実装上の注意点
 
-1. **学習スクリプト**: 本番用は`scripts/train_pruning.py`を使用。評価・実験用スクリプトは`tmp/old_scripts/`に保存
+1. **学習スクリプト**: 本番用は`scripts/pruning_train.py`を使用。評価・実験用スクリプトは`tmp/old_scripts/`に保存
 2. **設定ファイル**: `pruning-config/train-models/`にYAML形式で保存
 3. **gradient_accumulation_steps**: HuggingFace TrainingArgumentsを使用することで正しく反映される
 

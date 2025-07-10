@@ -32,8 +32,8 @@ pre-commit install            # gitフックのインストール
 uv run python tmp/sample.py   # tmpディレクトリのサンプルコード実行
 
 # Pruning学習スクリプト
-python scripts/train_pruning.py pruning-config/train-models/japanese-reranker-xsmall-v2.yaml
-python scripts/train_pruning.py --model_name_or_path hotchpotch/japanese-reranker-xsmall-v2 --subset msmarco-ja-minimal
+python scripts/pruning_train.py pruning-config/train-models/japanese-reranker-xsmall-v2.yaml
+python scripts/pruning_train.py --model_name_or_path hotchpotch/japanese-reranker-xsmall-v2 --subset msmarco-ja-minimal
 ```
 
 ## アーキテクチャ概要
@@ -70,7 +70,7 @@ python scripts/train_pruning.py --model_name_or_path hotchpotch/japanese-reranke
      - `crossencoder_wrapper.py` - CrossEncoder互換ラッパー
      - `models/pruning_head.py` - PruningHead（プルーニング用ヘッド）
    - `scripts/` - 学習スクリプト
-     - `train_pruning.py` - 統合学習スクリプト（HfArgumentParser対応、YAML/JSON設定ファイルサポート）
+     - `pruning_train.py` - 統合学習スクリプト（HfArgumentParser対応、YAML/JSON設定ファイルサポート）
    - `tests/pruning/` - テストスイート
      - `test_pruning_modes.py` - デュアルモード動作確認テスト
    - 学習済みモデル（6モデル）:
@@ -150,7 +150,7 @@ python scripts/train_pruning.py --model_name_or_path hotchpotch/japanese-reranke
   - Reranking+Pruning full: 0.7647
 - 重要な発見:
   - Reranking+Pruningは特にPOSサンプルで+9-13%の改善
-  - gradient_accumulation_stepsの問題は修正済み（train_pruning.py）
+  - gradient_accumulation_stepsの問題は修正済み（pruning_train.py）
 - Transformers互換性実装完了（2025年1月9日）:
   - AutoModelForSequenceClassification/TokenClassificationでのロード対応
   - CrossEncoder互換性（既存のCrossEncoderとして使用可能）
