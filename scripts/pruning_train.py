@@ -5,22 +5,22 @@ Supports various configurations through command line arguments and config files.
 
 Usage:
     # Using YAML config file
-    python scripts/train_pruning.py pruning-config/train-models/japanese-reranker-xsmall-v2.yaml
+    python scripts/pruning_train.py pruning-config/train-models/japanese-reranker-xsmall-v2.yaml
     
     # Using command line arguments
-    python scripts/train_pruning.py \
+    python scripts/pruning_train.py \
         --model_name_or_path hotchpotch/japanese-reranker-xsmall-v2 \
         --dataset_name hotchpotch/wip-msmarco-context-relevance \
         --subset msmarco-ja-minimal \
         --output_dir ./output/pruning-models/minimal
     
     # Mix config file with command line overrides
-    python scripts/train_pruning.py pruning-config/train-models/japanese-reranker-xsmall-v2.yaml \
+    python scripts/pruning_train.py pruning-config/train-models/japanese-reranker-xsmall-v2.yaml \
         --subset msmarco-ja-small \
         --num_train_epochs 2
     
     # Pruning-only mode
-    python scripts/train_pruning.py \
+    python scripts/pruning_train.py \
         --model_name_or_path cl-nagoya/ruri-v3-30m \
         --mode pruning_only \
         --subset msmarco-ja-minimal
@@ -140,12 +140,12 @@ class DataArguments:
 class PruningTrainingArguments(TrainingArguments):
     """Training arguments specific to PruningEncoder training."""
     ranking_weight: float = field(
-        default=1.0,
-        metadata={"help": "Weight for ranking loss"}
+        default=0.05,
+        metadata={"help": "Weight for ranking loss (Provence paper default: 0.05)"}
     )
     pruning_weight: float = field(
-        default=0.5,
-        metadata={"help": "Weight for pruning loss"}
+        default=1.0,
+        metadata={"help": "Weight for pruning loss (Provence paper default: 1.0)"}
     )
     use_teacher_scores: bool = field(
         default=True,

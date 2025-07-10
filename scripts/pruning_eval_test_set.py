@@ -7,13 +7,13 @@ It calculates precision, recall, exact match, F1, and F2 scores at different thr
 
 Usage:
     # Evaluate a specific model on test set
-    python scripts/eval_test_set_pruning.py \
+    python scripts/pruning_eval_test_set.py \
         --model_path ./output/pruning-models/japanese-reranker-xsmall-v2-reranking_pruning-msmarco-minimal-ja-250710135711/final_model \
         --subset msmarco-minimal-ja \
         --threshold 0.5
     
     # Evaluate with multiple thresholds
-    python scripts/eval_test_set_pruning.py \
+    python scripts/pruning_eval_test_set.py \
         --model_path ./output/pruning-models/model/final_model \
         --subset msmarco-small-ja \
         --thresholds 0.3 0.4 0.5 0.6 0.7
