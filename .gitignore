@@ -87,3 +87,8 @@ tmp
 tmp/
 log/
 logs/
+
+# Log directories
+logs/
+scripts/log/
+

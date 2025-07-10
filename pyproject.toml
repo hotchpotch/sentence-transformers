@@ -48,6 +48,7 @@ dependencies = [
     "langdetect>=1.0.9",
     "accelerate>=0.26.0",
     "wandb>=0.21.0",
+    "matplotlib>=3.9.4",
 ]
 
 [project.urls]
