@@ -66,6 +66,7 @@ logger = logging.getLogger(__name__)
 class ModelArguments:
     """Arguments pertaining to which model/config/tokenizer we are going to fine-tune from."""
     model_name_or_path: str = field(
+        default="hotchpotch/japanese-reranker-xsmall-v2",
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
     )
     mode: str = field(
@@ -102,7 +103,7 @@ class DataArguments:
         metadata={"help": "The name of the dataset to use (via the datasets library)."}
     )
     subset: str = field(
-        default="msmarco-ja-minimal",
+        default="msmarco-minimal-ja",
         metadata={"help": "Dataset subset to use"}
     )
     teacher_model_name: Optional[str] = field(
@@ -203,119 +204,19 @@ def prepare_dataset(
     seed: int = 42
 ) -> Tuple[Any, Any]:
     """
-    Load and prepare dataset with teacher scores.
+    Load dataset - let PruningDataCollator handle the processing.
     
     Args:
         data_args: Data arguments containing dataset info
-        teacher_model_name: Name of the teacher model for score column
+        teacher_model_name: Name of the teacher model for score column (unused, passed to DataCollator)
         seed: Random seed for splitting
     """
-    # Load dataset from HuggingFace first, fallback to local if needed
-    try:
-        logger.info(f"Loading dataset: {data_args.dataset_name}:{data_args.subset}")
-        dataset = load_dataset(data_args.dataset_name, data_args.subset)
-    except Exception as e:
-        logger.warning(f"Failed to load from HuggingFace: {e}")
-        logger.info("Trying local dataset fallback...")
-        
-        # Fallback to local dataset
-        subset_name = data_args.subset.replace('msmarco-ja-', '')
-        local_paths = [
-            f"tmp/datasets/dev-dataset/{subset_name}-fixed",
-            f"tmp/datasets/dev-dataset/{subset_name}"
-        ]
-        
-        dataset = None
-        for local_path in local_paths:
-            if os.path.exists(local_path):
-                logger.info(f"Loading local dataset: {local_path}")
-                from datasets import load_from_disk
-                dataset = load_from_disk(local_path)
-                break
-        
-        if dataset is None:
-            raise ValueError(f"Could not load dataset {data_args.dataset_name}:{data_args.subset} from HuggingFace or local paths")
+    # Load dataset from HuggingFace
+    logger.info(f"Loading dataset: {data_args.dataset_name}:{data_args.subset}")
+    dataset = load_dataset(data_args.dataset_name, data_args.subset)
     
-    # Construct teacher score column name
-    teacher_score_column = f"teacher_scores.{teacher_model_name}"
-    
-    # Prepare dataset with proper column names
-    def prepare_example(example):
-        """Prepare a single example for training."""
-        # Handle local dataset format vs HuggingFace format
-        if 'text' in example and 'texts' not in example:
-            # Local dataset format: convert single text to list
-            example['texts'] = [example['text']]
-        elif 'texts' not in example:
-            raise ValueError("Dataset must contain 'texts' or 'text' field")
-        
-        if 'query' not in example:
-            raise ValueError("Dataset must contain 'query' field")
-        
-        # Get teacher score - local datasets already have 'teacher_score' field
-        if 'teacher_score' in example:
-            # Local dataset already has teacher_score as float
-            score = example['teacher_score']
-            if isinstance(score, (int, float)):
-                # Convert single score to list to match texts
-                example['teacher_score'] = [score]
-            elif not isinstance(score, list):
-                raise ValueError(f"Teacher score must be float or list, got {type(score)}")
-        elif teacher_score_column in example:
-            example['teacher_score'] = example[teacher_score_column]
-        else:
-            # Try without dots (sometimes column names are escaped)
-            escaped_column = teacher_score_column.replace('.', '_')
-            if escaped_column in example:
-                example['teacher_score'] = example[escaped_column]
-            else:
-                # Fallback to using labels if teacher scores not available
-                logger.warning(f"Teacher score column '{teacher_score_column}' not found.")
-                logger.warning(f"Available columns: {list(example.keys())}")
-                logger.info("Falling back to using labels as teacher scores")
-                
-                # Use ranking_label if available, otherwise labels
-                if 'ranking_label' in example:
-                    # Convert single ranking label to list
-                    example['teacher_score'] = [float(example['ranking_label'])]
-                elif 'labels' in example:
-                    # Use labels directly (already a list)
-                    example['teacher_score'] = [float(label) for label in example['labels']]
-                else:
-                    raise ValueError(f"No teacher scores or labels found. Available columns: {list(example.keys())}")
-        
-        # Ensure teacher scores are float values for regression-based knowledge distillation
-        # This enables learning from continuous reranker scores rather than binary labels
-        # The PruningDataCollator will use these scores with MSE loss for better knowledge transfer
-        if not isinstance(example['teacher_score'], list):
-            raise ValueError(f"Teacher scores must be a list, got {type(example['teacher_score'])}")
-        
-        # Add required fields for DataCollator compatibility
-        # Convert ranking_label to labels (list format expected by DataCollator)
-        if 'ranking_label' in example:
-            example['labels'] = [example['ranking_label']]
-        
-        # Add chunk-related fields if they don't exist
-        # For single-text examples, we have simple chunk structure
-        if 'chunks_pos' not in example and 'sentence_boundaries' in example:
-            # Convert sentence boundaries to chunk positions
-            # DataCollator expects list of chunk positions for each text
-            example['chunks_pos'] = [example['sentence_boundaries']]  # List of lists for multiple texts
-        
-        if 'relevant_chunks' not in example and 'pruning_labels' in example:
-            # Convert pruning labels to relevant chunks
-            # DataCollator expects list of relevant chunk indices for each text
-            relevant_chunks = []
-            pruning_labels = example['pruning_labels']
-            for i, label in enumerate(pruning_labels):
-                if label == 1:  # If chunk is relevant
-                    relevant_chunks.append(i)
-            example['relevant_chunks'] = [relevant_chunks]  # List of lists for multiple texts
-        
-        return example
-    
-    # Apply preprocessing
-    train_dataset = dataset['train'].map(prepare_example)
+    # Get raw train dataset (let DataCollator handle processing)
+    train_dataset = dataset['train']
     
     # Handle validation set
     eval_dataset = None
@@ -323,10 +224,10 @@ def prepare_dataset(
     # Try to use existing validation set first (prioritize validation over test)
     if data_args.validation_split_name in dataset:
         logger.info(f"Using existing validation set: '{data_args.validation_split_name}'")
-        eval_dataset = dataset[data_args.validation_split_name].map(prepare_example)
+        eval_dataset = dataset[data_args.validation_split_name]
     elif 'validation' in dataset:
         logger.info("Using existing validation set: 'validation'")
-        eval_dataset = dataset['validation'].map(prepare_example)
+        eval_dataset = dataset['validation']
     
     # If no validation set found or split is explicitly specified, create split
     if eval_dataset is None or data_args.validation_split is not None or data_args.validation_split_samples is not None:
@@ -460,7 +361,12 @@ def parse_config_file(config_file: str) -> Tuple[ModelArguments, DataArguments, 
     model_config = config.get('model_args', {})
     model_args = ModelArguments(
         model_name_or_path=model_config.get('model_name_or_path', 'hotchpotch/japanese-reranker-xsmall-v2'),
-        classifier_dropout=model_config.get('classifier_dropout', 0.1)
+        mode=model_config.get('mode', 'reranking_pruning'),
+        classifier_dropout=model_config.get('classifier_dropout', 0.1),
+        max_length=model_config.get('max_length', 512),
+        config_name=model_config.get('config_name', None),
+        tokenizer_name=model_config.get('tokenizer_name', None),
+        cache_dir=model_config.get('cache_dir', None)
     )
     
     # Extract data arguments
@@ -735,12 +641,16 @@ def main():
         }
     )
     
-    # Create data collator
+    # Create data collator with teacher score column and correct column names
+    teacher_score_column = f"teacher_scores.{teacher_model_name}"
+    logger.info(f"Using teacher score column: {teacher_score_column}")
     data_collator = PruningDataCollator(
         tokenizer=model.tokenizer,
         max_length=model.max_length,
         mode=model.mode,
-        scores_column='teacher_score'  # Use teacher scores for distillation
+        scores_column=teacher_score_column,     # Use specific teacher score column
+        chunks_pos_column='context_spans',      # Use dataset's column name
+        relevant_chunks_column='context_relevance'  # Use dataset's column name
     )
     
     # Create loss function

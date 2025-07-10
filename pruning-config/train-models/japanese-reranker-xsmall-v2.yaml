@@ -4,7 +4,7 @@ model_args:
 
 data_args:
   dataset_name: "hotchpotch/wip-msmarco-context-relevance"
-  subset: "msmarco-ja-minimal"
+  subset: "msmarco-minimal-ja"
   teacher_model_name: "japanese-reranker-xsmall-v2"
 
 training_args:
