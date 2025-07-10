@@ -52,6 +52,12 @@ Sentence TransformersにProvence論文ベースのtext-pruner機能を実装す�
 - [ ] ドキュメント作成（API仕様等）
 - [ ] PR作成
 
+### 実装上の注意点
+
+1. **学習スクリプト**: 本番用は`scripts/train_pruning.py`を使用。評価・実験用スクリプトは`tmp/old_scripts/`に保存
+2. **設定ファイル**: `pruning-config/train-models/`にYAML形式で保存
+3. **gradient_accumulation_steps**: HuggingFace TrainingArgumentsを使用することで正しく反映される
+
 ## 現在の実装成果
 
 ### 学習済みモデル
@@ -124,12 +130,19 @@ sentence_transformers/
 │   ├── data_collator.py        # PruningDataCollator（モード自動判定）
 │   ├── trainer.py              # PruningTrainer（gradient_accumulation修正済み）
 │   ├── data_structures.py      # データ構造定義（RerankingPruningOutput, PruningOnlyOutput）
+│   ├── evaluation.py           # 評価メトリクス実装
+│   ├── modeling_pruning_encoder.py  # Transformers互換モデル
+│   ├── transformers_compat.py  # Transformers互換性ラッパー
+│   ├── crossencoder_wrapper.py # CrossEncoder互換ラッパー
 │   └── models/
 │       └── pruning_head.py     # プルーニングヘッド実装
 ├── utils/
 │   └── text_chunking.py        # 言語別文分割（実装済み）
 
-scripts/                         # 学習・評価スクリプト（実装済み）
+scripts/                         # 学習スクリプト
+└── train_pruning.py            # 統合学習スクリプト（YAML/JSON設定ファイル対応）
+
+tmp/old_scripts/                 # 評価・実験スクリプト（参考実装）
 ├── train_pruning_only_*.py     # pruning-onlyモード学習（minimal/small/full）
 ├── train_reranking_pruning_*.py # reranking+pruningモード学習
 ├── evaluate_pruning_f2*.py     # F2スコア評価

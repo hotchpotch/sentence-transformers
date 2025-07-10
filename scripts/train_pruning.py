@@ -34,6 +34,7 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, Optional, Union, Tuple, List
 from dataclasses import dataclass, field
+from datetime import datetime
 
 import torch
 from datasets import load_dataset, DatasetDict
@@ -51,6 +52,12 @@ from sentence_transformers.pruning import (
     PruningLoss,
     PruningDataCollator
 )
+
+try:
+    import wandb
+    _wandb_available = True
+except ImportError:
+    _wandb_available = False
 
 logger = logging.getLogger(__name__)
 
@@ -195,10 +202,24 @@ def prepare_dataset(
         validation_split: Split ratio if no validation set exists
         seed: Random seed for splitting
     """
-    # Load dataset from HuggingFace
-    logger.info(f"Loading dataset: {data_args.dataset_name}:{data_args.subset}")
+    # Check if it's a local dataset first
+    subset_name = data_args.subset.replace('msmarco-ja-', '')
+    local_dataset_path = f"tmp/datasets/dev-dataset/{subset_name}-fixed"
     
-    dataset = load_dataset(data_args.dataset_name, data_args.subset)
+    # Try -fixed variant first, then fallback to base name
+    if os.path.exists(local_dataset_path):
+        logger.info(f"Loading local dataset: {local_dataset_path}")
+        from datasets import load_from_disk
+        dataset = load_from_disk(local_dataset_path)
+    elif os.path.exists(f"tmp/datasets/dev-dataset/{subset_name}"):
+        local_dataset_path = f"tmp/datasets/dev-dataset/{subset_name}"
+        logger.info(f"Loading local dataset: {local_dataset_path}")
+        from datasets import load_from_disk
+        dataset = load_from_disk(local_dataset_path)
+    else:
+        # Load dataset from HuggingFace
+        logger.info(f"Loading dataset: {data_args.dataset_name}:{data_args.subset}")
+        dataset = load_dataset(data_args.dataset_name, data_args.subset)
     
     # Construct teacher score column name
     teacher_score_column = f"teacher_scores.{teacher_model_name}"
@@ -206,12 +227,26 @@ def prepare_dataset(
     # Prepare dataset with proper column names
     def prepare_example(example):
         """Prepare a single example for training."""
-        # Ensure required fields exist
-        if 'query' not in example or 'document' not in example:
-            raise ValueError("Dataset must contain 'query' and 'document' fields")
+        # Handle local dataset format vs HuggingFace format
+        if 'text' in example and 'texts' not in example:
+            # Local dataset format: convert single text to list
+            example['texts'] = [example['text']]
+        elif 'texts' not in example:
+            raise ValueError("Dataset must contain 'texts' or 'text' field")
         
-        # Get teacher score
-        if teacher_score_column in example:
+        if 'query' not in example:
+            raise ValueError("Dataset must contain 'query' field")
+        
+        # Get teacher score - local datasets already have 'teacher_score' field
+        if 'teacher_score' in example:
+            # Local dataset already has teacher_score as float
+            score = example['teacher_score']
+            if isinstance(score, (int, float)):
+                # Convert single score to list to match texts
+                example['teacher_score'] = [score]
+            elif not isinstance(score, list):
+                raise ValueError(f"Teacher score must be float or list, got {type(score)}")
+        elif teacher_score_column in example:
             example['teacher_score'] = example[teacher_score_column]
         else:
             # Try without dots (sometimes column names are escaped)
@@ -219,14 +254,48 @@ def prepare_dataset(
             if escaped_column in example:
                 example['teacher_score'] = example[escaped_column]
             else:
-                # List available columns for debugging
+                # Fallback to using labels if teacher scores not available
                 logger.warning(f"Teacher score column '{teacher_score_column}' not found.")
                 logger.warning(f"Available columns: {list(example.keys())}")
-                raise ValueError(f"Teacher score column '{teacher_score_column}' not found in dataset")
+                logger.info("Falling back to using labels as teacher scores")
+                
+                # Use ranking_label if available, otherwise labels
+                if 'ranking_label' in example:
+                    # Convert single ranking label to list
+                    example['teacher_score'] = [float(example['ranking_label'])]
+                elif 'labels' in example:
+                    # Use labels directly (already a list)
+                    example['teacher_score'] = [float(label) for label in example['labels']]
+                else:
+                    raise ValueError(f"No teacher scores or labels found. Available columns: {list(example.keys())}")
         
-        # Add label if not present (for compatibility)
-        if 'label' not in example:
-            example['label'] = 1 if example['teacher_score'] > 0.5 else 0
+        # Ensure teacher scores are float values for regression-based knowledge distillation
+        # This enables learning from continuous reranker scores rather than binary labels
+        # The PruningDataCollator will use these scores with MSE loss for better knowledge transfer
+        if not isinstance(example['teacher_score'], list):
+            raise ValueError(f"Teacher scores must be a list, got {type(example['teacher_score'])}")
+        
+        # Add required fields for DataCollator compatibility
+        # Convert ranking_label to labels (list format expected by DataCollator)
+        if 'ranking_label' in example:
+            example['labels'] = [example['ranking_label']]
+        
+        # Add chunk-related fields if they don't exist
+        # For single-text examples, we have simple chunk structure
+        if 'chunks_pos' not in example and 'sentence_boundaries' in example:
+            # Convert sentence boundaries to chunk positions
+            # DataCollator expects list of chunk positions for each text
+            example['chunks_pos'] = [example['sentence_boundaries']]  # List of lists for multiple texts
+        
+        if 'relevant_chunks' not in example and 'pruning_labels' in example:
+            # Convert pruning labels to relevant chunks
+            # DataCollator expects list of relevant chunk indices for each text
+            relevant_chunks = []
+            pruning_labels = example['pruning_labels']
+            for i, label in enumerate(pruning_labels):
+                if label == 1:  # If chunk is relevant
+                    relevant_chunks.append(i)
+            example['relevant_chunks'] = [relevant_chunks]  # List of lists for multiple texts
         
         return example
     
@@ -267,7 +336,7 @@ class PruningHfTrainer(Trainer):
         super().__init__(*args, **kwargs)
         self.loss_fn = loss_fn
     
-    def compute_loss(self, model, inputs, return_outputs=False):
+    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         """Compute loss using PruningLoss."""
         sentence_features = inputs["sentence_features"]
         labels = inputs["labels"]
@@ -285,6 +354,63 @@ class PruningHfTrainer(Trainer):
         loss = self.loss_fn(sentence_features, labels)
         
         return (loss, None) if return_outputs else loss
+    
+    def prediction_step(self, model, inputs, prediction_loss_only: bool, ignore_keys=None):
+        """Custom prediction step that handles PruningDataCollator format."""
+        has_labels = "labels" in inputs
+        
+        with torch.no_grad():
+            if has_labels:
+                loss = self.compute_loss(model, inputs, return_outputs=False)
+            else:
+                loss = None
+        
+        # For evaluation, we mainly care about the loss
+        if prediction_loss_only:
+            return (loss, None, None)
+        
+        # We don't need logits for evaluation in this case
+        return (loss, None, None)
+
+
+def calculate_dynamic_steps(
+    dataset_size: int,
+    per_device_batch_size: int,
+    gradient_accumulation_steps: int,
+    num_epochs: float,
+    num_devices: int = 1,
+    target_eval_points: int = 20,
+    target_log_points: int = 100
+) -> Tuple[int, int]:
+    """
+    Calculate dynamic eval_steps and logging_steps based on dataset size and training config.
+    
+    Args:
+        dataset_size: Number of training samples
+        per_device_batch_size: Batch size per device
+        gradient_accumulation_steps: Gradient accumulation steps
+        num_epochs: Number of training epochs
+        num_devices: Number of devices (for distributed training)
+        target_eval_points: Target number of evaluation points
+        target_log_points: Target number of logging points
+        
+    Returns:
+        Tuple of (eval_steps, logging_steps)
+    """
+    # Calculate total steps
+    effective_batch_size = per_device_batch_size * gradient_accumulation_steps * num_devices
+    steps_per_epoch = dataset_size // effective_batch_size
+    total_steps = int(steps_per_epoch * num_epochs)
+    
+    # Calculate dynamic steps
+    eval_steps = max(1, total_steps // target_eval_points)
+    logging_steps = max(1, total_steps // target_log_points)
+    
+    # Ensure logging is more frequent than eval
+    if logging_steps > eval_steps:
+        logging_steps = max(1, eval_steps // 2)
+    
+    return eval_steps, logging_steps, total_steps
 
 
 def parse_config_file(config_file: str) -> Tuple[ModelArguments, DataArguments, PruningTrainingArguments]:
@@ -304,6 +430,15 @@ def parse_config_file(config_file: str) -> Tuple[ModelArguments, DataArguments, 
     
     # Extract training arguments
     training_config = config.get('training_args', {})
+    # Ensure evaluation strategy matches save strategy when load_best_model_at_end is True
+    load_best_model = training_config.get('load_best_model_at_end', True)
+    
+    # Note: eval_steps and logging_steps will be calculated dynamically
+    # Remove them from config to avoid confusion
+    eval_steps = training_config.get('eval_steps', None)
+    logging_steps = training_config.get('logging_steps', None)
+    save_steps = training_config.get('save_steps', None)
+    
     training_args = PruningTrainingArguments(
         output_dir=training_config.get('output_dir', './output'),
         overwrite_output_dir=training_config.get('overwrite_output_dir', True),
@@ -316,11 +451,13 @@ def parse_config_file(config_file: str) -> Tuple[ModelArguments, DataArguments, 
         max_grad_norm=training_config.get('max_grad_norm', 1.0),
         lr_scheduler_type=training_config.get('lr_scheduler_type', 'cosine'),
         warmup_ratio=training_config.get('warmup_ratio', 0.1),
-        logging_steps=training_config.get('logging_steps', 100),
-        save_steps=training_config.get('save_steps', 500),
-        eval_steps=training_config.get('eval_steps', 500),
+        # Dynamic steps will be set later
+        logging_steps=logging_steps or 100,  # Temporary default
+        save_steps=save_steps or 500,  # Temporary default
+        eval_steps=eval_steps or 500,  # Temporary default
+        eval_strategy="steps" if load_best_model else "no",  # Enable evaluation if needed
         save_total_limit=training_config.get('save_total_limit', 5),
-        load_best_model_at_end=training_config.get('load_best_model_at_end', True),
+        load_best_model_at_end=load_best_model,
         metric_for_best_model="eval_loss",
         greater_is_better=False,
         fp16=training_config.get('fp16', False),
@@ -329,6 +466,11 @@ def parse_config_file(config_file: str) -> Tuple[ModelArguments, DataArguments, 
         optim=training_config.get('optimizer', training_config.get('optim', 'adafactor')),
         report_to=training_config.get('report_to', ['wandb']),
     )
+    
+    # Store original config values for reference
+    training_args._original_eval_steps = eval_steps
+    training_args._original_logging_steps = logging_steps
+    training_args._original_save_steps = save_steps
     
     return model_args, data_args, training_args
 
@@ -377,6 +519,37 @@ def main():
     # Set seed
     set_seed(training_args.seed)
     
+    # Create timestamp for unique naming
+    timestamp = datetime.now().strftime("%y%m%d%H%M%S")
+    
+    # Initialize WandB if available
+    if _wandb_available and "wandb" in training_args.report_to:
+        # Set WandB project name
+        os.environ["WANDB_PROJECT"] = "pruning"
+        
+        # Create run name based on configuration with timestamp
+        run_name = f"{Path(model_args.model_name_or_path).name}-{model_args.mode}-{data_args.subset}-{timestamp}"
+        
+        wandb.init(
+            project="pruning",
+            name=run_name,
+            config={
+                "model_name": model_args.model_name_or_path,
+                "mode": model_args.mode,
+                "dataset": data_args.dataset_name,
+                "subset": data_args.subset,
+                "num_epochs": training_args.num_train_epochs,
+                "batch_size": training_args.per_device_train_batch_size,
+                "learning_rate": training_args.learning_rate,
+                "optim": training_args.optim,
+                "ranking_weight": training_args.ranking_weight,
+                "pruning_weight": training_args.pruning_weight,
+                "timestamp": timestamp,
+            }
+        )
+    else:
+        run_name = f"{Path(model_args.model_name_or_path).name}-{model_args.mode}-{data_args.subset}-{timestamp}"
+    
     # Extract teacher model name
     if data_args.teacher_model_name:
         teacher_model_name = data_args.teacher_model_name
@@ -390,8 +563,11 @@ def main():
         output_base_dir = "./output/pruning-models"
         training_args.output_dir = os.path.join(
             output_base_dir,
-            f"{Path(model_args.model_name_or_path).name}-{model_args.mode}-{data_args.subset}"
+            run_name
         )
+    
+    # Set TrainingArguments run_name to match WandB
+    training_args.run_name = run_name
     
     # Load dataset with teacher scores
     train_dataset, eval_dataset = prepare_dataset(
@@ -399,6 +575,48 @@ def main():
         teacher_model_name=teacher_model_name,
         seed=training_args.seed
     )
+    
+    # Calculate dynamic steps based on dataset size
+    eval_steps, logging_steps, total_steps = calculate_dynamic_steps(
+        dataset_size=len(train_dataset),
+        per_device_batch_size=training_args.per_device_train_batch_size,
+        gradient_accumulation_steps=training_args.gradient_accumulation_steps,
+        num_epochs=training_args.num_train_epochs,
+        num_devices=training_args.n_gpu if training_args.n_gpu > 0 else 1
+    )
+    
+    # Check if we're overriding original config values and warn
+    original_eval_steps = getattr(training_args, '_original_eval_steps', None)
+    original_logging_steps = getattr(training_args, '_original_logging_steps', None)
+    original_save_steps = getattr(training_args, '_original_save_steps', None)
+    
+    if original_eval_steps and original_eval_steps != eval_steps:
+        logger.warning(f"Overriding eval_steps from config ({original_eval_steps}) with dynamic value ({eval_steps})")
+    if original_logging_steps and original_logging_steps != logging_steps:
+        logger.warning(f"Overriding logging_steps from config ({original_logging_steps}) with dynamic value ({logging_steps})")
+    
+    # Update training arguments with dynamic values
+    training_args.eval_steps = eval_steps
+    training_args.logging_steps = logging_steps
+    training_args.save_steps = original_save_steps or eval_steps  # Use same as eval_steps if not specified
+    
+    # Enable evaluation if we have eval dataset
+    if eval_dataset is not None:
+        training_args.eval_strategy = "steps"
+        training_args.load_best_model_at_end = True
+        training_args.metric_for_best_model = "eval_loss"
+        training_args.greater_is_better = False
+    else:
+        # Disable evaluation if no eval dataset
+        training_args.eval_strategy = "no"
+        training_args.load_best_model_at_end = False
+    
+    logger.info(f"Dynamic step calculation:")
+    logger.info(f"  Dataset size: {len(train_dataset):,}")
+    logger.info(f"  Total steps: {total_steps:,}")
+    logger.info(f"  Eval steps: {eval_steps} (20 evaluations)")
+    logger.info(f"  Logging steps: {logging_steps} (100 logs)")
+    logger.info(f"  Save steps: {training_args.save_steps}")
     
     # Initialize PruningEncoder
     logger.info(f"Initializing PruningEncoder with {model_args.model_name_or_path} in {model_args.mode} mode")
@@ -417,10 +635,9 @@ def main():
     # Create data collator
     data_collator = PruningDataCollator(
         tokenizer=model.tokenizer,
-        text_chunker=model.text_chunker,
         max_length=model.max_length,
         mode=model.mode,
-        sentence_level_pruning=training_args.sentence_level_pruning
+        scores_column='teacher_score'  # Use teacher scores for distillation
     )
     
     # Create loss function
@@ -429,9 +646,7 @@ def main():
         mode=model.mode,
         ranking_weight=training_args.ranking_weight,
         pruning_weight=training_args.pruning_weight,
-        use_teacher_scores=training_args.use_teacher_scores,
-        is_regression=True,  # Regression task
-        sentence_level_pruning=training_args.sentence_level_pruning
+        is_regression=True  # Regression task for teacher score distillation
     )
     
     # Decide whether to use HF Trainer or PruningTrainer
@@ -448,6 +663,9 @@ def main():
             data_collator=data_collator,
             loss_fn=loss_fn,
         )
+        
+        # Enable evaluation loss calculation
+        training_args.prediction_loss_only = False
     else:
         # Convert TrainingArguments to dict for PruningTrainer
         training_args_dict = {
@@ -522,29 +740,50 @@ def main():
     test_examples = [
         {
             "query": "機械学習とは何ですか？",
-            "document": "機械学習は人工知能の一分野です。コンピュータがデータから学習することを可能にします。今日の天気は晴れです。鳥は空を飛ぶことができます。"
+            "documents": ["機械学習は人工知能の一分野です。コンピュータがデータから学習することを可能にします。今日の天気は晴れです。鳥は空を飛ぶことができます。"]
         },
         {
             "query": "Pythonはどのように動作しますか？",
-            "document": "Pythonはインタープリタ型のプログラミング言語です。動的型付けを使用します。コーヒーは人気のある飲み物です。Pythonのコードは一行ずつ実行されます。"
+            "documents": ["Pythonはインタープリタ型のプログラミング言語です。動的型付けを使用します。コーヒーは人気のある飲み物です。Pythonのコードは一行ずつ実行されます。"]
         }
     ]
     
     for example in test_examples:
         logger.info(f"\nQuery: {example['query']}")
-        logger.info(f"Document: {example['document'][:100]}...")
+        logger.info(f"Document: {example['documents'][0][:100]}...")
         
-        # Predict with pruning
+        # For predict_context, we need sentences as (query, document) pairs and chunk positions
+        # Simulate simple sentence-level chunking
+        document = example['documents'][0]
+        sentences = (example['query'], document)
+        
+        # Simple sentence splitting for chunk positions (character-level offsets)
+        import re
+        sentence_ends = [m.end() for m in re.finditer(r'[。！？]', document)]
+        if not sentence_ends or sentence_ends[-1] < len(document):
+            sentence_ends.append(len(document))
+        
+        chunk_positions = []
+        start = 0
+        for end in sentence_ends:
+            chunk_positions.append([start, end])
+            start = end
+        
+        # Predict with pruning using chunk-based evaluation
         output = loaded_model.predict_context(
-            query=example['query'],
-            documents=[example['document']],
-            pruning_threshold=0.3,  # Optimal threshold from spec
-            return_documents=True
+            sentences=sentences,
+            chunk_positions=chunk_positions,
+            chunk_threshold=0.3  # Optimal threshold from spec
         )
         
-        logger.info(f"Ranking score: {output.ranking_scores[0]:.4f}")
-        logger.info(f"Compression ratio: {output.compression_ratio:.2%}")
-        logger.info(f"Pruned document: {output.pruned_documents[0]}")
+        logger.info(f"Chunk-level compression ratio: {output.compression_ratio:.2%}")
+        if hasattr(output, 'chunk_predictions') and output.chunk_predictions is not None:
+            num_relevant_chunks = int(output.chunk_predictions.sum())
+            logger.info(f"Number of relevant chunks: {num_relevant_chunks}/{len(chunk_positions)}")
+        if hasattr(output, 'pruned_documents') and output.pruned_documents:
+            logger.info(f"Pruned document: {output.pruned_documents[0]}")
+        elif hasattr(output, 'pruned_document'):
+            logger.info(f"Pruned document: {output.pruned_document}")
     
     logger.info("\n" + "="*50)
     logger.info("Training completed successfully!")

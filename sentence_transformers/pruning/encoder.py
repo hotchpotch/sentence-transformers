@@ -158,8 +158,8 @@ class PruningEncoder(nn.Module):
     
     def forward(
         self,
-        input_ids: torch.Tensor,
-        attention_mask: torch.Tensor,
+        input_ids: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
         sentence_boundaries: Optional[torch.Tensor] = None,
         return_dict: bool = True,
         **kwargs  # Accept additional kwargs like token_type_ids
@@ -176,6 +176,26 @@ class PruningEncoder(nn.Module):
         Returns:
             Dictionary with mode-appropriate outputs
         """
+        # Handle PruningDataCollator output format
+        if input_ids is None and 'sentence_features' in kwargs:
+            # This is called from PruningDataCollator format
+            sentence_features = kwargs.pop('sentence_features')
+            if sentence_features and len(sentence_features) > 0:
+                input_ids = sentence_features[0].get('input_ids')
+                attention_mask = sentence_features[0].get('attention_mask')
+        
+        # Handle standard HuggingFace format  
+        if input_ids is None and 'input_ids' in kwargs:
+            input_ids = kwargs.pop('input_ids')
+        if attention_mask is None and 'attention_mask' in kwargs:
+            attention_mask = kwargs.pop('attention_mask')
+        
+        if input_ids is None:
+            logger.error(f"Forward called without input_ids. Available kwargs: {list(kwargs.keys())}")
+            raise ValueError("input_ids must be provided")
+        if attention_mask is None:
+            logger.error(f"Forward called without attention_mask. Available kwargs: {list(kwargs.keys())}")
+            raise ValueError("attention_mask must be provided")
         if self.mode == "reranking_pruning":
             # Get outputs from ranking model
             outputs = self.ranking_model(

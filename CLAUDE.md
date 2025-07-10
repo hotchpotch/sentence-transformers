@@ -30,6 +30,10 @@ pre-commit install            # gitフックのインストール
 
 # 開発用サンプル実行
 uv run python tmp/sample.py   # tmpディレクトリのサンプルコード実行
+
+# Pruning学習スクリプト
+python scripts/train_pruning.py pruning-config/train-models/japanese-reranker-xsmall-v2.yaml
+python scripts/train_pruning.py --model_name_or_path hotchpotch/japanese-reranker-xsmall-v2 --subset msmarco-ja-minimal
 ```
 
 ## アーキテクチャ概要
@@ -59,17 +63,25 @@ uv run python tmp/sample.py   # tmpディレクトリのサンプルコード実
      - `losses.py` - PruningLoss（モード自動判定損失関数）
      - `trainer.py` - PruningTrainer
      - `data_structures.py` - RerankingPruningOutput、PruningOnlyOutput等のデータ構造
+     - `data_collator.py` - PruningDataCollator（バッチ処理）
+     - `evaluation.py` - 評価メトリクス
+     - `modeling_pruning_encoder.py` - Transformers互換モデル
+     - `transformers_compat.py` - Transformers互換性ラッパー
+     - `crossencoder_wrapper.py` - CrossEncoder互換ラッパー
      - `models/pruning_head.py` - PruningHead（プルーニング用ヘッド）
-   - `scripts/` - 学習・評価スクリプト群
-     - `train_pruning.py` - 統合学習スクリプト（minimal/small/full対応）
-     - `evaluate_pruning.py` - 統合評価スクリプト
-     - `evaluate_pruning_f2.py` - F2スコア最適化評価
-     - `train_pruning_only.py` - pruning-onlyモード学習
+   - `scripts/` - 学習スクリプト
+     - `train_pruning.py` - 統合学習スクリプト（HfArgumentParser対応、YAML/JSON設定ファイルサポート）
+   - `tests/pruning/` - テストスイート
      - `test_pruning_modes.py` - デュアルモード動作確認テスト
-   - 学習済みモデル:
-     - minimal: 2エポック完了（F2=0.832、圧縮率48.4%）
-     - small: 1.46エポック完了（F2=0.882、圧縮率53.1%）※2エポックで十分と判明
-     - full: 最終的な性能（F2=0.862、圧縮率44.8%）
+   - 学習済みモデル（6モデル）:
+     - Pruning-only（cl-nagoya/ruri-v3-30m ベース）:
+       - minimal: F2=0.7204
+       - small: F2=0.7204
+       - full: F2=0.7516
+     - Reranking+Pruning（japanese-reranker-xsmall-v2 ベース）:
+       - minimal: F2=0.7187
+       - small: F2=0.7823（最良のバランス）
+       - full: F2=0.7647
 
 ### 参考ドキュメント
 
@@ -82,7 +94,14 @@ uv run python tmp/sample.py   # tmpディレクトリのサンプルコード実
   - `train-reranker.md`: Rerankerの学習方法
   - `train-sparse-encoder.md`: Sparse Encoderの学習方法
   - `static-embeddings.md`: Static Embeddingsの解説
-- **specs/**: 実装仕様書（前述の通り）
+- **specs/**: 実装仕様書
+  - `spec.md`: 実装の最新仕様（更新時は必ず反映）
+  - `provence-implementation-spec.md`: Provence実装の詳細設計
+  - `data-format-spec.md`: データフォーマット仕様
+  - `detailed-implementation-plan.md`: 詳細実装計画
+  - `text-pruner-dataset.md`: データセット仕様
+- **評価スクリプト類（tmp/old_scripts/に存在）**
+  - 各種学習・評価スクリプトの実装例が保存されている
 
 ### コーディング規約
 
@@ -125,13 +144,13 @@ uv run python tmp/sample.py   # tmpディレクトリのサンプルコード実
   - Pruning-only: minimal/small/full（cl-nagoya/ruri-v3-30m ベース）
   - Reranking+Pruning: minimal/small/full（japanese-reranker-xsmall-v2 ベース）
 - 最適閾値: 0.3（すべてのモデルで最高F2スコア）
-- 性能比較（F2スコア）:
+- 性能比較（F2スコア @閾値0.3）:
   - Pruning-only full: 0.7516
   - Reranking+Pruning small: 0.7823（最良のバランス）
   - Reranking+Pruning full: 0.7647
 - 重要な発見:
   - Reranking+Pruningは特にPOSサンプルで+9-13%の改善
-  - gradient_accumulation_stepsがtrainer.pyで正しく反映されない問題を発見
+  - gradient_accumulation_stepsの問題は修正済み（train_pruning.py）
 - Transformers互換性実装完了（2025年1月9日）:
   - AutoModelForSequenceClassification/TokenClassificationでのロード対応
   - CrossEncoder互換性（既存のCrossEncoderとして使用可能）
@@ -146,6 +165,8 @@ uv run python tmp/sample.py   # tmpディレクトリのサンプルコード実
   - `spec.md`: 実装の最新仕様（更新時は必ず反映）
   - `provence-implementation-spec.md`: Provence実装の詳細設計
   - `data-format-spec.md`: データフォーマット仕様
+  - `detailed-implementation-plan.md`: 詳細実装計画
+  - `text-pruner-dataset.md`: データセット仕様
 - **更新ルール**: 実装やスペック変更時は必ず`git add`と`git commit`を実行
 
 ### 実装の差分確認

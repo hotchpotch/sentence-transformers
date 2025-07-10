@@ -50,7 +50,8 @@ class PruningDataCollator:
             query_column: Name of the query column in the dataset
             texts_column: Name of the texts column in the dataset
             labels_column: Name of the labels column in the dataset
-            scores_column: Name of the teacher scores column (if None, use labels_column)
+            scores_column: Name of the teacher scores column containing continuous reranker scores
+                          for knowledge distillation. If None, falls back to binary labels_column.
             chunks_pos_column: Name of the chunks positions column
             relevant_chunks_column: Name of the relevant chunks column
             dataset_name_column: Name of the dataset name column (optional)
@@ -197,11 +198,14 @@ class PruningDataCollator:
             # Handle labels based on mode
             if self.mode == "reranking_pruning":
                 labels = feature[self.labels_column]
-                # Get ranking targets (teacher scores or labels)
+                # Get ranking targets for distillation
+                # Prefer teacher scores (continuous values from reranker) over binary labels
+                # This enables knowledge distillation from a teacher reranker model
+                # using MSE loss on continuous scores rather than classification on binary labels
                 if self.scores_column and self.scores_column in feature:
-                    ranking_targets = feature[self.scores_column]
+                    ranking_targets = feature[self.scores_column]  # Float teacher scores for regression
                 else:
-                    ranking_targets = labels
+                    ranking_targets = labels  # Fallback to binary labels if no teacher scores
             else:  # pruning_only
                 # Create dummy labels/targets for compatibility
                 labels = [0] * len(texts)  # Dummy values
@@ -268,7 +272,9 @@ class PruningDataCollator:
         max_docs = max(len(feature[self.texts_column]) for feature in features)
         
         if self.mode == "reranking_pruning":
-            # Ranking targets matrix (can be labels or teacher scores)
+            # Ranking targets matrix for knowledge distillation
+            # Uses continuous teacher scores when available for regression loss
+            # Falls back to binary labels for classification if no teacher scores
             ranking_targets_matrix = torch.full(
                 (batch_size, max_docs),
                 fill_value=-100,  # Padding value
@@ -280,11 +286,13 @@ class PruningDataCollator:
                 texts = feature[self.texts_column]
                 num_docs = len(texts)
                 
-                # Get targets (teacher scores or labels)
+                # Get targets for distillation
+                # Prefer teacher scores (float values from teacher reranker)
+                # over binary labels for better knowledge transfer
                 if self.scores_column and self.scores_column in feature:
-                    targets = feature[self.scores_column]
+                    targets = feature[self.scores_column]  # Continuous teacher scores
                 else:
-                    targets = feature[self.labels_column]
+                    targets = feature[self.labels_column]  # Binary labels as fallback
                 
                 # Fill ranking targets
                 ranking_targets_matrix[i, :num_docs] = torch.tensor(
