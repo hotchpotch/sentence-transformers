@@ -183,6 +183,10 @@ class PruningTrainingArguments(TrainingArguments):
         default=True,
         metadata={"help": "Whether to use bf16 16-bit (mixed) precision training instead of 32-bit training."}
     )
+    lr_scheduler_type: str = field(
+        default="cosine",
+        metadata={"help": "The scheduler type to use."}
+    )
 
 
 def prepare_dataset(
@@ -650,7 +654,8 @@ def main():
     )
     
     # Decide whether to use HF Trainer or PruningTrainer
-    use_hf_trainer = training_args.local_rank != -1  # Use HF Trainer for distributed training
+    # Always use HF Trainer for better compatibility and feature support
+    use_hf_trainer = True
     
     if use_hf_trainer:
         # Use HuggingFace Trainer with custom compute_loss
