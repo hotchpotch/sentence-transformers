@@ -17,13 +17,16 @@ Usage:
     # Mix config file with command line overrides
     python scripts/pruning_train.py pruning-config/train-models/japanese-reranker-xsmall-v2.yaml \
         --subset msmarco-ja-small \
-        --num_train_epochs 2
+        --num_train_epochs 1
     
     # Pruning-only mode
     python scripts/pruning_train.py \
         --model_name_or_path cl-nagoya/ruri-v3-30m \
         --mode pruning_only \
-        --subset msmarco-ja-minimal
+        --subset msmarco-ja-minimal \
+        --output_dir ./output/ruri-v3-30m_pruning-only_minimal_20250111_123456
+
+Recommended output_dir format: `./output/{model-name}_{mode}_{subset}_{YYYYMMDD_HHMMSS}/`
 """
 
 import os
@@ -103,7 +106,7 @@ class DataArguments:
         metadata={"help": "The name of the dataset to use (via the datasets library)."}
     )
     subset: str = field(
-        default="msmarco-minimal-ja",
+        default="msmarco-ja-minimal",
         metadata={"help": "Dataset subset to use"}
     )
     teacher_model_name: Optional[str] = field(
@@ -139,6 +142,10 @@ class DataArguments:
 @dataclass
 class PruningTrainingArguments(TrainingArguments):
     """Training arguments specific to PruningEncoder training."""
+    output_dir: Optional[str] = field(
+        default=None,
+        metadata={"help": "Output directory for model and checkpoints. Format example: ./output/japanese-reranker-xsmall-v2_reranking-pruning_minimal_20250111_123456"}
+    )
     ranking_weight: float = field(
         default=0.05,
         metadata={"help": "Weight for ranking loss (Provence paper default: 0.05)"}
@@ -395,7 +402,7 @@ def parse_config_file(config_file: str) -> Tuple[ModelArguments, DataArguments, 
     save_steps = training_config.get('save_steps', None)
     
     training_args = PruningTrainingArguments(
-        output_dir=training_config.get('output_dir', './output'),
+        output_dir=training_config.get('output_dir', None),  # Optional, will be auto-generated if not provided
         overwrite_output_dir=training_config.get('overwrite_output_dir', True),
         num_train_epochs=training_config.get('num_train_epochs', 1),
         per_device_train_batch_size=training_config.get('per_device_train_batch_size', 32),
@@ -567,13 +574,17 @@ def main():
         teacher_model_name = "japanese-reranker-xsmall-v2"
     logger.info(f"Using teacher model: {teacher_model_name}")
     
-    # Set output directory if not specified
-    if not training_args.output_dir or training_args.output_dir == "./output":
-        output_base_dir = "./output/pruning-models"
-        training_args.output_dir = os.path.join(
-            output_base_dir,
-            run_name
-        )
+    # Set output_dir if not specified
+    if not training_args.output_dir:
+        # Generate default output_dir with timestamp
+        model_name = Path(model_args.model_name_or_path).name
+        output_dir = f"./output/{model_name}_{model_args.mode}_{data_args.subset}_{timestamp}"
+        training_args.output_dir = output_dir
+        print(f"\n{'='*80}")
+        print(f"No output_dir specified. Auto-generated output directory:")
+        print(f"  {output_dir}")
+        print(f"{'='*80}\n")
+        logger.info(f"Auto-generated output_dir: {output_dir}")
     
     # Set TrainingArguments run_name to match WandB
     training_args.run_name = run_name
@@ -650,7 +661,7 @@ def main():
         mode=model.mode,
         scores_column=teacher_score_column,     # Use specific teacher score column
         chunks_pos_column='context_spans',      # Use dataset's column name
-        relevant_chunks_column='context_relevance'  # Use dataset's column name
+        relevant_chunks_column='context_spans_relevance'  # Use dataset's column name
     )
     
     # Create loss function
@@ -798,6 +809,13 @@ def main():
             logger.info(f"Pruned document: {output.pruned_documents[0]}")
         elif hasattr(output, 'pruned_document'):
             logger.info(f"Pruned document: {output.pruned_document}")
+    
+    # Print final summary
+    print(f"\n{'='*80}")
+    print("🎉 Training completed successfully!")
+    print(f"📁 Model saved to: {final_model_path}")
+    print(f"🚀 To use this model: PruningEncoder.from_pretrained('{final_model_path}')")
+    print(f"{'='*80}\n")
     
     logger.info("\n" + "="*50)
     logger.info("Training completed successfully!")
