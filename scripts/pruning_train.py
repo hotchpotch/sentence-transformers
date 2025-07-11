@@ -517,6 +517,20 @@ def main():
         # No config file, parse command line only
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
     
+    # Create timestamp for unique naming
+    timestamp = datetime.now().strftime("%y%m%d%H%M%S")
+    
+    # Set output_dir if not specified or using default
+    if not training_args.output_dir or training_args.output_dir == "trainer_output":
+        # Generate default output_dir with timestamp
+        model_name = Path(model_args.model_name_or_path).name
+        output_dir = f"./output/{model_name}_{model_args.mode}_{data_args.subset}_{timestamp}"
+        training_args.output_dir = output_dir
+        print(f"\n{'='*80}")
+        print(f"No output_dir specified. Auto-generated output directory:")
+        print(f"  {output_dir}")
+        print(f"{'='*80}\n")
+    
     # Setup logging
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
@@ -531,12 +545,10 @@ def main():
         + f"distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.fp16 or training_args.bf16}"
     )
     logger.info(f"Training/evaluation parameters {training_args}")
+    logger.info(f"Output directory: {training_args.output_dir}")
     
     # Set seed
     set_seed(training_args.seed)
-    
-    # Create timestamp for unique naming
-    timestamp = datetime.now().strftime("%y%m%d%H%M%S")
     
     # Initialize WandB if available
     if _wandb_available and "wandb" in training_args.report_to:
@@ -573,18 +585,6 @@ def main():
         # Default to japanese-reranker-xsmall-v2
         teacher_model_name = "japanese-reranker-xsmall-v2"
     logger.info(f"Using teacher model: {teacher_model_name}")
-    
-    # Set output_dir if not specified
-    if not training_args.output_dir:
-        # Generate default output_dir with timestamp
-        model_name = Path(model_args.model_name_or_path).name
-        output_dir = f"./output/{model_name}_{model_args.mode}_{data_args.subset}_{timestamp}"
-        training_args.output_dir = output_dir
-        print(f"\n{'='*80}")
-        print(f"No output_dir specified. Auto-generated output directory:")
-        print(f"  {output_dir}")
-        print(f"{'='*80}\n")
-        logger.info(f"Auto-generated output_dir: {output_dir}")
     
     # Set TrainingArguments run_name to match WandB
     training_args.run_name = run_name
