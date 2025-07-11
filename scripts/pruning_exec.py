@@ -34,6 +34,31 @@ def format_context_with_del(context: str, should_delete: bool) -> str:
         return context
 
 
+def sentence_rounding_provence(probabilities: np.ndarray, start_pos: int, end_pos: int, threshold: float) -> bool:
+    """
+    Provence-style sentence rounding: use average score for the entire sentence.
+    
+    Args:
+        probabilities: Token-level keep probabilities
+        start_pos: Start position in the probability array
+        end_pos: End position in the probability array
+        threshold: Threshold for keeping the sentence
+        
+    Returns:
+        True if sentence should be kept, False if it should be deleted
+    """
+    # Get probabilities for this sentence
+    sentence_probs = probabilities[start_pos:end_pos]
+    
+    # Calculate average probability (Provence approach)
+    if len(sentence_probs) > 0:
+        avg_prob = np.mean(sentence_probs)
+        return avg_prob >= threshold
+    else:
+        # If no tokens, keep the sentence
+        return True
+
+
 def main():
     parser = argparse.ArgumentParser(description='Execute pruning on query-context pairs')
     parser.add_argument('-m', '--model', required=True, help='Path to the pruning model')
@@ -42,6 +67,8 @@ def main():
     parser.add_argument('--thresholds', nargs='+', type=float, default=[0.3],
                       help='Pruning thresholds (default: 0.3)')
     parser.add_argument('--batch-size', type=int, default=32, help='Batch size for inference')
+    parser.add_argument('--use-majority', action='store_true', 
+                      help='Use majority voting instead of Provence-style averaging')
     
     args = parser.parse_args()
     
@@ -143,13 +170,18 @@ def main():
                 start_pos = context_boundaries[i]
                 end_pos = context_boundaries[i + 1]
                 
-                # Get probabilities for this context
-                context_probs = pruning_probs[start_pos:end_pos]
-                
-                # Context is kept if majority of tokens are above threshold
-                kept_tokens = np.sum(context_probs >= threshold)
-                total_tokens = len(context_probs)
-                is_deleted = kept_tokens < (total_tokens / 2)
+                if args.use_majority:
+                    # Original majority voting approach
+                    context_probs = pruning_probs[start_pos:end_pos]
+                    kept_tokens = np.sum(context_probs >= threshold)
+                    total_tokens = len(context_probs)
+                    is_deleted = kept_tokens < (total_tokens / 2)
+                else:
+                    # Provence-style averaging approach
+                    is_kept = sentence_rounding_provence(
+                        pruning_probs, start_pos, end_pos, threshold
+                    )
+                    is_deleted = not is_kept
                 
                 formatted_context = format_context_with_del(context, is_deleted)
                 formatted_contexts.append(formatted_context)

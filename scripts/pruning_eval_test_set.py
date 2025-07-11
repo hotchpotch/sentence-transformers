@@ -49,7 +49,7 @@ def calculate_pruning_metrics(
     
     Args:
         predicted_chunks: Binary predictions for each chunk [batch_size, num_chunks]
-        true_chunks: True relevance labels for each chunk (indices of relevant chunks)
+        true_chunks: Binary labels for each chunk (already in [0,1,0,1] format)
         context_spans: Token positions for each chunk
         
     Returns:
@@ -62,20 +62,15 @@ def calculate_pruning_metrics(
     # For debugging
     total_texts_processed = 0
     
-    for pred_chunks, true_chunk_indices, spans in zip(predicted_chunks, true_chunks, context_spans):
-        # pred_chunks: [0, 0, 1, 0, 1, 1] (binary predictions for each chunk)
-        # true_chunk_indices: [2, 4, 5] (indices of relevant chunks)
+    for pred_chunks, true_binary, spans in zip(predicted_chunks, true_chunks, context_spans):
+        # Both pred_chunks and true_binary are already in binary format
+        # pred_chunks: [0, 0, 1, 0, 1, 1] (binary predictions)
+        # true_binary: [0, 0, 1, 0, 1, 1] (binary labels)
         
-        num_chunks = len(pred_chunks)
-        
-        # Convert true chunk indices to binary array
-        true_binary = [0] * num_chunks
-        for idx in true_chunk_indices:
-            if idx < num_chunks:
-                true_binary[idx] = 1
-        
-        # Example: if true_chunk_indices = [2, 4, 5] and num_chunks = 6
-        # true_binary = [0, 0, 1, 0, 1, 1]
+        # Ensure same length
+        num_chunks = min(len(pred_chunks), len(true_binary))
+        pred_chunks = pred_chunks[:num_chunks]
+        true_binary = true_binary[:num_chunks]
         
         # Add to overall lists
         all_predictions.extend(pred_chunks)
@@ -128,7 +123,8 @@ def evaluate_model_on_dataset(
     threshold: float = 0.5,
     batch_size: int = 64,
     max_samples: int = None,
-    teacher_model_name: str = "japanese-reranker-xsmall-v2"
+    teacher_model_name: str = "japanese-reranker-xsmall-v2",
+    use_majority: bool = False
 ) -> Dict[str, Any]:
     """
     Evaluate a PruningEncoder model on a dataset.
@@ -165,7 +161,7 @@ def evaluate_model_on_dataset(
         mode=model.mode,
         scores_column=f'teacher_scores.{teacher_model_name}',
         chunks_pos_column='context_spans',
-        relevant_chunks_column='context_relevance'
+        relevant_chunks_column='context_spans_relevance'
     )
     
     # Collect predictions and labels
@@ -224,7 +220,7 @@ def evaluate_model_on_dataset(
                         # Process each sample in batch
                         for j, sample in enumerate(batch_data):
                             spans_per_text = sample['context_spans']  # List of spans for each text
-                            true_chunks_per_text = sample['context_relevance']  # List of relevant chunk indices for each text
+                            true_chunks_per_text = sample['context_spans_relevance']  # List of relevant chunk indices for each text
                             sample_keep_probs = keep_probs[j].cpu().numpy()
                             
                             # Process each text in the sample
@@ -232,13 +228,19 @@ def evaluate_model_on_dataset(
                                 text_spans = spans_per_text[text_idx]
                                 true_relevant_indices = true_chunks_per_text[text_idx]
                                 
-                                # Calculate average probability for each chunk in this text
+                                # Calculate probability for each chunk in this text
                                 chunk_predictions = []
                                 for chunk_idx, (span_start, span_end) in enumerate(text_spans):
-                                    # Get average probability for this chunk
-                                    chunk_prob = sample_keep_probs[span_start:span_end].mean()
-                                    # Apply threshold
-                                    chunk_pred = 1 if chunk_prob >= threshold else 0
+                                    if use_majority:
+                                        # Majority voting approach (legacy)
+                                        chunk_probs = sample_keep_probs[span_start:span_end]
+                                        kept_tokens = np.sum(chunk_probs >= threshold)
+                                        total_tokens = len(chunk_probs)
+                                        chunk_pred = 1 if kept_tokens >= (total_tokens / 2) else 0
+                                    else:
+                                        # Provence-style averaging approach (default)
+                                        chunk_prob = sample_keep_probs[span_start:span_end].mean()
+                                        chunk_pred = 1 if chunk_prob >= threshold else 0
                                     chunk_predictions.append(chunk_pred)
                                 
                                 all_predicted_chunks.append(chunk_predictions)
@@ -253,7 +255,7 @@ def evaluate_model_on_dataset(
                     
                     for j, sample in enumerate(batch_data):
                         spans_per_text = sample['context_spans']
-                        true_chunks_per_text = sample['context_relevance']
+                        true_chunks_per_text = sample['context_spans_relevance']
                         sample_keep_probs = keep_probs[j].cpu().numpy()
                         
                         # Process each text in the sample
@@ -261,10 +263,19 @@ def evaluate_model_on_dataset(
                             text_spans = spans_per_text[text_idx]
                             true_relevant_indices = true_chunks_per_text[text_idx]
                             
+                            # Calculate probability for pruning-only mode
                             chunk_predictions = []
                             for chunk_idx, (span_start, span_end) in enumerate(text_spans):
-                                chunk_prob = sample_keep_probs[span_start:span_end].mean()
-                                chunk_pred = 1 if chunk_prob >= threshold else 0
+                                if use_majority:
+                                    # Majority voting approach (legacy)
+                                    chunk_probs = sample_keep_probs[span_start:span_end]
+                                    kept_tokens = np.sum(chunk_probs >= threshold)
+                                    total_tokens = len(chunk_probs)
+                                    chunk_pred = 1 if kept_tokens >= (total_tokens / 2) else 0
+                                else:
+                                    # Provence-style averaging (default)
+                                    chunk_prob = sample_keep_probs[span_start:span_end].mean()
+                                    chunk_pred = 1 if chunk_prob >= threshold else 0
                                 chunk_predictions.append(chunk_pred)
                             
                             all_predicted_chunks.append(chunk_predictions)
@@ -320,7 +331,8 @@ def evaluate_multiple_thresholds(
     thresholds: List[float],
     batch_size: int = 64,
     max_samples: int = None,
-    teacher_model_name: str = "japanese-reranker-xsmall-v2"
+    teacher_model_name: str = "japanese-reranker-xsmall-v2",
+    use_majority: bool = False
 ) -> List[Dict[str, Any]]:
     """Evaluate model at multiple thresholds."""
     results = []
@@ -328,7 +340,7 @@ def evaluate_multiple_thresholds(
         logger.info(f"Evaluating at threshold: {threshold}")
         result = evaluate_model_on_dataset(
             model, dataset_name, subset, threshold, 
-            batch_size, max_samples, teacher_model_name
+            batch_size, max_samples, teacher_model_name, use_majority
         )
         results.append(result)
     return results
@@ -390,6 +402,11 @@ def main():
         default=None,
         help="Path to save results JSON"
     )
+    parser.add_argument(
+        "--use_majority",
+        action="store_true",
+        help="Use majority voting instead of Provence-style averaging (for comparison)"
+    )
     
     args = parser.parse_args()
     
@@ -408,13 +425,13 @@ def main():
     if len(thresholds) == 1:
         results = evaluate_model_on_dataset(
             model, args.dataset_name, args.subset, thresholds[0],
-            args.batch_size, args.max_samples, args.teacher_model_name
+            args.batch_size, args.max_samples, args.teacher_model_name, args.use_majority
         )
         results_list = [results]
     else:
         results_list = evaluate_multiple_thresholds(
             model, args.dataset_name, args.subset, thresholds,
-            args.batch_size, args.max_samples, args.teacher_model_name
+            args.batch_size, args.max_samples, args.teacher_model_name, args.use_majority
         )
     
     # Print results
