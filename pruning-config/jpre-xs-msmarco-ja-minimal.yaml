@@ -3,8 +3,8 @@ model_args:
   classifier_dropout: 0.0
 
 data_args:
-  dataset_name: "hotchpotch/wip-query-context-pruner-with-teacher-scores-binary-fixed"
-  subset: "msmarco-ja-small"
+  dataset_name: "hotchpotch/wip-msmarco-context-relevance"
+  subset: "msmarco-ja-minimal"
   teacher_model_name: "japanese-reranker-xsmall-v2"
 
 training_args:
@@ -42,3 +42,4 @@ training_args:
 
   # Reporting
   report_to: ["wandb"]
+

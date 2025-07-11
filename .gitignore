@@ -77,10 +77,7 @@ checkpoints
 tmp
 .DS_Store
 /runs
-/tmp_trainer/
-/outputs/
 /output/
-/trainer_output/
 /results/
 /log/
 /logs/
