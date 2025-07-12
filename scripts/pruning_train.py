@@ -368,6 +368,9 @@ class PruningHfTrainer(Trainer):
         super().__init__(*args, **kwargs)
         self.loss_fn = loss_fn
         self._eval_loss_components = {}
+        # Track loss components similar to yast
+        self._accumulated_loss_components = {}
+        self._loss_component_counts = {}
     
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         """Compute loss using PruningLoss."""
@@ -386,37 +389,51 @@ class PruningHfTrainer(Trainer):
         # Compute loss
         loss = self.loss_fn(sentence_features, labels)
         
-        # Log individual loss components if available
+        # Track loss components for aggregation (similar to yast)
         if hasattr(self.loss_fn, 'last_loss_components') and self.loss_fn.last_loss_components:
-            # Create metrics to log
-            metrics = {}
             for name, value in self.loss_fn.last_loss_components.items():
+                if name not in self._accumulated_loss_components:
+                    self._accumulated_loss_components[name] = 0.0
+                    self._loss_component_counts[name] = 0
+                
                 if isinstance(value, torch.Tensor):
-                    metrics[f'{name}'] = value.item()
+                    self._accumulated_loss_components[name] += value.item()
                 else:
-                    metrics[f'{name}'] = value
-            
-            # Use self.log to properly log metrics (will be picked up by wandb)
-            if hasattr(self, 'log'):
-                self.log(metrics)
-            
-            # Also add to log_history for direct access
-            if hasattr(self.state, 'log_history') and self.state.log_history is not None:
-                # Find or create the current step's log entry
-                current_step = self.state.global_step
-                if len(self.state.log_history) > 0 and self.state.log_history[-1].get('step') == current_step:
-                    # Update existing entry
-                    self.state.log_history[-1].update(metrics)
-                else:
-                    # Create new entry
-                    log_entry = {
-                        'step': current_step,
-                        'epoch': self.state.epoch if hasattr(self.state, 'epoch') else 0,
-                        **metrics
-                    }
-                    self.state.log_history.append(log_entry)
+                    self._accumulated_loss_components[name] += value
+                self._loss_component_counts[name] += 1
         
         return (loss, None) if return_outputs else loss
+    
+    def log(self, logs: dict, start_time=None, **kwargs) -> None:
+        """Override log method to include accumulated loss components (inspired by yast)."""
+        # Add step and epoch
+        logs["step"] = self.state.global_step
+        if self.state.epoch is not None:
+            logs["epoch"] = round(self.state.epoch, 2)
+        
+        # Calculate and add mean loss components
+        if self._accumulated_loss_components:
+            mean_components = {}
+            for name, total in self._accumulated_loss_components.items():
+                count = self._loss_component_counts.get(name, 1)
+                if count > 0:
+                    mean_components[name] = total / count
+            
+            # Update logs with mean components
+            logs.update(mean_components)
+            
+            # Clear accumulators
+            self._accumulated_loss_components.clear()
+            self._loss_component_counts.clear()
+        
+        # Append to log history
+        output = {**logs, "step": self.state.global_step}
+        self.state.log_history.append(output)
+        
+        # Call parent's callback handler
+        self.control = self.callback_handler.on_log(
+            self.args, self.state, self.control, logs
+        )
     
     def prediction_step(self, model, inputs, prediction_loss_only: bool, ignore_keys=None):
         """Custom prediction step that handles PruningDataCollator format."""
@@ -459,11 +476,6 @@ class PruningHfTrainer(Trainer):
                 avg_value = sum(values) / len(values)
                 output.metrics[f'eval_{name}'] = avg_value
             
-            # Log eval loss components
-            if hasattr(self, 'log'):
-                eval_metrics = {f'eval_{name}': sum(values) / len(values) 
-                               for name, values in self._eval_loss_components.items()}
-                self.log(eval_metrics)
         
         return output
 
