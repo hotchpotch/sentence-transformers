@@ -605,13 +605,24 @@ def main():
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
     
     # Create timestamp for unique naming
-    timestamp = datetime.now().strftime("%y%m%d%H%M%S")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
     # Set output_dir if not specified or using default
     if not training_args.output_dir or training_args.output_dir == "trainer_output":
         # Generate default output_dir with timestamp
-        model_name = Path(model_args.model_name_or_path).name
-        output_dir = f"./output/{model_name}_{model_args.mode}_{data_args.subset}_{timestamp}"
+        if config_file_arg:
+            # Use config file name as base
+            config_base = Path(config_file_arg).stem
+            output_dir = f"./output/{config_base}_{timestamp}"
+        else:
+            # Fallback to old naming scheme
+            model_name = Path(model_args.model_name_or_path).name
+            if data_args.datasets:
+                # For multi-dataset configs, use a generic name
+                output_dir = f"./output/{model_name}_{model_args.mode}_multi-dataset_{timestamp}"
+            else:
+                output_dir = f"./output/{model_name}_{model_args.mode}_{data_args.subset}_{timestamp}"
+        
         training_args.output_dir = output_dir
         print(f"\n{'='*80}")
         print(f"No output_dir specified. Auto-generated output directory:")
@@ -643,7 +654,17 @@ def main():
         os.environ["WANDB_PROJECT"] = "pruning"
         
         # Create run name based on configuration with timestamp
-        run_name = f"{Path(model_args.model_name_or_path).name}-{model_args.mode}-{data_args.subset}-{timestamp}"
+        if config_file_arg:
+            # Use config file name as base for run name
+            config_base = Path(config_file_arg).stem
+            run_name = f"{config_base}-{timestamp}"
+        else:
+            # Fallback to old naming scheme
+            model_name = Path(model_args.model_name_or_path).name
+            if data_args.datasets:
+                run_name = f"{model_name}-{model_args.mode}-multi-dataset-{timestamp}"
+            else:
+                run_name = f"{model_name}-{model_args.mode}-{data_args.subset}-{timestamp}"
         
         wandb.init(
             project="pruning",
@@ -663,7 +684,17 @@ def main():
             }
         )
     else:
-        run_name = f"{Path(model_args.model_name_or_path).name}-{model_args.mode}-{data_args.subset}-{timestamp}"
+        if config_file_arg:
+            # Use config file name as base for run name
+            config_base = Path(config_file_arg).stem
+            run_name = f"{config_base}-{timestamp}"
+        else:
+            # Fallback to old naming scheme
+            model_name = Path(model_args.model_name_or_path).name
+            if data_args.datasets:
+                run_name = f"{model_name}-{model_args.mode}-multi-dataset-{timestamp}"
+            else:
+                run_name = f"{model_name}-{model_args.mode}-{data_args.subset}-{timestamp}"
     
     # Extract teacher model name
     if data_args.teacher_model_name:
