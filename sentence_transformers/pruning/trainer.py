@@ -230,7 +230,33 @@ class PruningTrainer:
                     # Logging
                     if self.global_step % self.training_args["logging_steps"] == 0:
                         avg_loss = epoch_loss / (step + 1)
+                        
+                        # Build log dictionary
+                        log_dict = {
+                            "loss": avg_loss,
+                            "global_step": self.global_step,
+                            "epoch": self.epoch
+                        }
+                        
+                        # Add loss components if available
+                        if hasattr(self, '_last_loss_components'):
+                            for name, value in self._last_loss_components.items():
+                                if isinstance(value, torch.Tensor):
+                                    log_dict[f"train/{name}"] = value.item()
+                                else:
+                                    log_dict[f"train/{name}"] = value
+                        
+                        # Log to console
                         logger.info(f"Step {self.global_step}, Loss: {avg_loss:.4f}")
+                        if hasattr(self, '_last_loss_components'):
+                            components_str = ", ".join([f"{k}: {v.item() if isinstance(v, torch.Tensor) else v:.4f}" 
+                                                       for k, v in self._last_loss_components.items()])
+                            logger.info(f"  Components: {components_str}")
+                        
+                        # Run callbacks with full log dict
+                        for callback in self.callbacks:
+                            if hasattr(callback, '__call__'):
+                                callback("on_log", self, log_dict)
                     
                     # Evaluation
                     if (eval_dataloader is not None and 
@@ -272,6 +298,10 @@ class PruningTrainer:
         
         # Compute loss
         loss = self.loss_fn(sentence_features, labels)
+        
+        # Store loss components for logging if available
+        if hasattr(self.loss_fn, 'last_loss_components'):
+            self._last_loss_components = self.loss_fn.last_loss_components.copy()
         
         return loss
     

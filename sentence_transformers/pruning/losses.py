@@ -65,6 +65,9 @@ class PruningLoss(nn.Module):
             
         self.pruning_loss_fn = pruning_loss_fn or nn.CrossEntropyLoss(ignore_index=-100)
         
+        # Initialize last loss components tracker
+        self.last_loss_components = {}
+        
     def forward(self, sentence_features: List[Dict[str, torch.Tensor]], labels: Dict[str, torch.Tensor]):
         """
         Compute joint loss for ranking and pruning.
@@ -119,6 +122,9 @@ class PruningLoss(nn.Module):
                     'pruning_labels' in labels
                 )
             )
+        
+        # Store loss components for logging
+        self.last_loss_components = losses
         
         # Log loss components
         if logger.isEnabledFor(logging.DEBUG):

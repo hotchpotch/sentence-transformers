@@ -367,6 +367,7 @@ class PruningHfTrainer(Trainer):
     def __init__(self, *args, loss_fn=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.loss_fn = loss_fn
+        self._eval_loss_components = {}
     
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         """Compute loss using PruningLoss."""
@@ -385,6 +386,36 @@ class PruningHfTrainer(Trainer):
         # Compute loss
         loss = self.loss_fn(sentence_features, labels)
         
+        # Log individual loss components if available
+        if hasattr(self.loss_fn, 'last_loss_components') and self.loss_fn.last_loss_components:
+            # Create metrics to log
+            metrics = {}
+            for name, value in self.loss_fn.last_loss_components.items():
+                if isinstance(value, torch.Tensor):
+                    metrics[f'{name}'] = value.item()
+                else:
+                    metrics[f'{name}'] = value
+            
+            # Use self.log to properly log metrics (will be picked up by wandb)
+            if hasattr(self, 'log'):
+                self.log(metrics)
+            
+            # Also add to log_history for direct access
+            if hasattr(self.state, 'log_history') and self.state.log_history is not None:
+                # Find or create the current step's log entry
+                current_step = self.state.global_step
+                if len(self.state.log_history) > 0 and self.state.log_history[-1].get('step') == current_step:
+                    # Update existing entry
+                    self.state.log_history[-1].update(metrics)
+                else:
+                    # Create new entry
+                    log_entry = {
+                        'step': current_step,
+                        'epoch': self.state.epoch if hasattr(self.state, 'epoch') else 0,
+                        **metrics
+                    }
+                    self.state.log_history.append(log_entry)
+        
         return (loss, None) if return_outputs else loss
     
     def prediction_step(self, model, inputs, prediction_loss_only: bool, ignore_keys=None):
@@ -394,6 +425,16 @@ class PruningHfTrainer(Trainer):
         with torch.no_grad():
             if has_labels:
                 loss = self.compute_loss(model, inputs, return_outputs=False)
+                
+                # Track eval loss components
+                if hasattr(self.loss_fn, 'last_loss_components') and self.loss_fn.last_loss_components:
+                    for name, value in self.loss_fn.last_loss_components.items():
+                        if name not in self._eval_loss_components:
+                            self._eval_loss_components[name] = []
+                        if isinstance(value, torch.Tensor):
+                            self._eval_loss_components[name].append(value.item())
+                        else:
+                            self._eval_loss_components[name].append(value)
             else:
                 loss = None
         
@@ -403,6 +444,28 @@ class PruningHfTrainer(Trainer):
         
         # We don't need logits for evaluation in this case
         return (loss, None, None)
+    
+    def evaluation_loop(self, *args, **kwargs):
+        """Override evaluation loop to log loss components."""
+        # Reset eval loss components
+        self._eval_loss_components = {}
+        
+        # Run parent evaluation loop
+        output = super().evaluation_loop(*args, **kwargs)
+        
+        # Calculate average loss components and add to metrics
+        if self._eval_loss_components:
+            for name, values in self._eval_loss_components.items():
+                avg_value = sum(values) / len(values)
+                output.metrics[f'eval_{name}'] = avg_value
+            
+            # Log eval loss components
+            if hasattr(self, 'log'):
+                eval_metrics = {f'eval_{name}': sum(values) / len(values) 
+                               for name, values in self._eval_loss_components.items()}
+                self.log(eval_metrics)
+        
+        return output
 
 
 def calculate_dynamic_steps(
