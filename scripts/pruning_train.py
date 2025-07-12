@@ -77,6 +77,10 @@ class ModelArguments:
         default="reranking_pruning",
         metadata={"help": "Model mode: 'reranking_pruning' or 'pruning_only'"}
     )
+    num_labels: Optional[int] = field(
+        default=None,
+        metadata={"help": "Number of labels for ranking head. If None, will auto-detect from model or use 2 (Provence default)"}
+    )
     classifier_dropout: float = field(
         default=0.1,
         metadata={"help": "Dropout rate for classifier heads"}
@@ -832,10 +836,30 @@ def main():
     logger.info(f"  Save steps: {training_args.save_steps}")
     
     # Initialize PruningEncoder
+    # Determine num_labels
+    if model_args.num_labels is not None:
+        num_labels = model_args.num_labels
+        logger.info(f"Using specified num_labels={num_labels}")
+    else:
+        # Auto-detect from model or use default
+        try:
+            from transformers import AutoConfig
+            config = AutoConfig.from_pretrained(model_args.model_name_or_path)
+            existing_num_labels = getattr(config, 'num_labels', None)
+            if existing_num_labels is not None:
+                num_labels = existing_num_labels
+                logger.info(f"Auto-detected num_labels={num_labels} from model")
+            else:
+                num_labels = 2  # Default for 2-class classification
+                logger.info(f"Using default num_labels={num_labels} (2-class classification)")
+        except Exception:
+            num_labels = 2  # Default for 2-class classification
+            logger.info(f"Could not detect num_labels, using default={num_labels}")
+    
     logger.info(f"Initializing PruningEncoder with {model_args.model_name_or_path} in {model_args.mode} mode")
     model = PruningEncoder(
         model_name_or_path=model_args.model_name_or_path,
-        num_labels=1,  # For regression task
+        num_labels=num_labels,
         max_length=model_args.max_length,
         mode=model_args.mode,
         pruning_config={
@@ -858,7 +882,8 @@ def main():
         mode=model.mode,
         scores_column=teacher_score_column,     # Use specific teacher score column
         chunks_pos_column='context_spans',      # Use dataset's column name
-        relevant_chunks_column='context_spans_relevance'  # Use dataset's column name
+        relevant_chunks_column='context_spans_relevance',  # Use dataset's column name
+        # mini_batch_size=16  # Disabled for debugging
     )
     
     # Create loss function

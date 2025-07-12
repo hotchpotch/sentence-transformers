@@ -39,7 +39,7 @@ class PruningDataCollator:
                  relevant_chunks_column: str = "relevant_chunks",
                  dataset_name_column: Optional[str] = "dataset_name",
                  id_column: Optional[str] = "id",
-                 mini_batch_size: Optional[int] = None):
+                 mini_batch_size: Optional[int] = None):  # Deprecated, kept for compatibility
         """
         Args:
             tokenizer: HuggingFace tokenizer
@@ -70,7 +70,7 @@ class PruningDataCollator:
         self.padding = padding
         self.truncation = truncation
         self.mode = mode
-        self.mini_batch_size = mini_batch_size
+        self.mini_batch_size = None  # Disabled for performance - mini batching is slower
         
         # Column names
         self.query_column = query_column
@@ -87,6 +87,11 @@ class PruningDataCollator:
         
         # Column validation will be done when first batch is processed
         self._validated = False
+        
+        # Cache tokenizer properties for performance
+        self._has_sep_token = '[SEP]' in self.tokenizer.get_vocab()
+        self._eos_token_id = self.tokenizer.eos_token_id or 2
+        self._sep_token_id = self.tokenizer.sep_token_id if hasattr(self.tokenizer, 'sep_token_id') else None
         
     def _define_required_columns(self):
         """Define required columns based on mode"""
@@ -222,42 +227,17 @@ class PruningDataCollator:
                 pair_chunks_pos.append(chunk_pos)
                 pair_relevant_chunks.append(rel_chunks)
         
-        # Process pairs in mini-batches if specified
-        if self.mini_batch_size and len(pairs) > self.mini_batch_size:
-            # Process in chunks
-            all_encodings = []
-            for i in range(0, len(pairs), self.mini_batch_size):
-                mini_pairs = pairs[i:i + self.mini_batch_size]
-                encoded = self.tokenizer(
-                    mini_pairs,
-                    padding='max_length',  # Use max_length padding for consistency
-                    truncation=self.truncation,
-                    max_length=self.max_length,
-                    return_tensors='pt',
-                    return_offsets_mapping=True  # Need this for chunk mapping
-                )
-                all_encodings.append(encoded)
-            
-            # Concatenate all encodings
-            encoded_inputs = {
-                key: torch.cat([enc[key] for enc in all_encodings], dim=0)
-                for key in all_encodings[0].keys()
-                if key != 'offset_mapping'  # Handle offset_mapping separately
-            }
-            
-            # Concatenate offset mappings
-            offset_mappings = torch.cat([enc['offset_mapping'] for enc in all_encodings], dim=0)
-        else:
-            # Process all at once
-            encoded_inputs = self.tokenizer(
-                pairs,
-                padding='max_length' if self.mini_batch_size else self.padding,
-                truncation=self.truncation,
-                max_length=self.max_length,
-                return_tensors='pt',
-                return_offsets_mapping=True
-            )
-            offset_mappings = encoded_inputs.pop('offset_mapping')
+        # Tokenize all pairs at once (no mini-batching for performance)
+        encoded_inputs = self.tokenizer(
+            pairs,
+            padding=self.padding,
+            truncation=self.truncation,
+            max_length=self.max_length,
+            return_tensors='pt',
+            return_offsets_mapping=True
+        )
+        # Extract offset mappings (keep on same device as inputs for speed)
+        offset_mappings = encoded_inputs.pop('offset_mapping')
         
         # Generate chunk-based pruning labels
         pruning_labels = self._generate_chunk_based_labels(
@@ -336,10 +316,10 @@ class PruningDataCollator:
         Generate token-level pruning labels based on chunk relevance.
         
         Rules:
-        - [CLS] token: always 0
-        - Query tokens: always 0  
-        - Tokens in relevant chunks: 1
-        - Tokens in non-relevant chunks: 0
+        - Special tokens: -100 (ignored in loss)
+        - Query tokens: -100 (ignored in loss - we only prune document content)
+        - Tokens in relevant chunks: 1 (keep)
+        - Tokens in non-relevant chunks: 0 (prune)
         
         Args:
             encoded_inputs: Tokenized inputs
@@ -354,70 +334,85 @@ class PruningDataCollator:
         batch_size = encoded_inputs['input_ids'].shape[0]
         seq_length = encoded_inputs['input_ids'].shape[1]
         
-        # Initialize with zeros
+        # Initialize with zeros (following original working implementation)
         pruning_labels = torch.zeros((batch_size, seq_length), dtype=torch.long)
         
-        for idx, (pair, chunk_positions, rel_chunk_indices, offsets) in enumerate(
-            zip(pairs, chunks_pos, relevant_chunks, offset_mappings)
-        ):
+        # offset_mappings is a tensor with shape [num_pairs, seq_length, 2]
+        # We need to iterate over the first dimension properly
+        for idx in range(len(pairs)):
+            pair = pairs[idx]
+            chunk_positions = chunks_pos[idx]
+            rel_chunk_indices = relevant_chunks[idx]
+            offsets = offset_mappings[idx]
             query, document = pair
             
             # Find where the document starts in the tokenized sequence
-            # For XLMRoberta: <s> query </s> <s> document </s>
+            # Different tokenizers use different formats:
+            # - XLMRoberta: <s> query </s> </s> document </s>
+            # - ModernBERT: [CLS] query [SEP] document [SEP]
             token_ids = encoded_inputs['input_ids'][idx]
             
-            # Use EOS token ID for XLMRoberta
-            eos_token_id = self.tokenizer.eos_token_id or 2  # XLMRoberta uses ID 2 for </s>
-            sep_positions = (token_ids == eos_token_id).nonzero(as_tuple=True)[0]
-            
-            if len(sep_positions) >= 2:
-                # Document starts after first </s> + <s>
-                doc_start_token = sep_positions[0].item() + 2  # Skip </s> and <s>
-                doc_end_token = sep_positions[1].item()
+            # Use cached tokenizer properties for performance
+            if self._has_sep_token:
+                # ModernBERT style with [SEP] tokens
+                sep_positions = (token_ids == self._sep_token_id).nonzero(as_tuple=True)[0]
                 
-                # For each token in the document range
-                for token_idx in range(doc_start_token, doc_end_token):
-                    # Get character position of this token
-                    token_start, token_end = offsets[token_idx]
-                    
-                    # Skip special tokens
-                    if token_start == 0 and token_end == 0:
-                        continue
-                    
-                    # Check if this token belongs to any relevant chunk
-                    for chunk_idx in rel_chunk_indices:
-                        if chunk_idx < len(chunk_positions):
-                            chunk_start, chunk_end = chunk_positions[chunk_idx]
-                            
-                            # Check if token overlaps with this chunk
-                            # Note: offsets are relative to the document text, not the full input
-                            if token_start < chunk_end and token_end > chunk_start:
-                                pruning_labels[idx, token_idx] = 1
-                                break
+                if len(sep_positions) >= 2:  # Need at least 2 [SEP] tokens
+                    # Document starts after first [SEP]
+                    doc_start_token = sep_positions[0].item() + 1
+                    doc_end_token = sep_positions[1].item()
+                else:
+                    # Skip if we can't find proper boundaries
+                    continue
             else:
-                # Fallback: simpler approach based on chunk boundaries
-                # This is less accurate but ensures some labeling
-                if relevant_chunks:
-                    # Find document part roughly
-                    query_len = len(query)
-                    
-                    for token_idx, (start, end) in enumerate(offsets):
-                        # Skip special tokens
-                        if start == 0 and end == 0:
-                            continue
+                # XLMRoberta style with </s> tokens
+                sep_positions = (token_ids == self._eos_token_id).nonzero(as_tuple=True)[0]
+                
+                
+                if len(sep_positions) >= 3:  # Need at least 3 </s> tokens for XLMRoberta
+                    # Document starts after first </s> + <s> (original working calculation)
+                    doc_start_token = sep_positions[0].item() + 2  # Skip </s> and <s>
+                    doc_end_token = sep_positions[2].item()  # Use the third </s> as document end
+                else:
+                    # Skip if we can't find proper boundaries
+                    continue
+            
+            # Find document offset for adjustment (make offsets relative to document)
+            doc_offset = 0
+            for i in range(doc_start_token, min(doc_start_token + 5, doc_end_token)):
+                if offsets[i][0] != 0 or offsets[i][1] != 0:
+                    doc_offset = offsets[i][0].item() if torch.is_tensor(offsets[i][0]) else offsets[i][0]
+                    break
+                
+            # Mask query and special tokens with -100 (exclude from loss)
+            for token_idx in range(0, doc_start_token):
+                pruning_labels[idx, token_idx] = -100
+                
+            # For each token in the document range (original simple logic)
+            for token_idx in range(doc_start_token, doc_end_token):
+                # Get character position of this token
+                token_start, token_end = offsets[token_idx]
+                
+                # Skip special tokens
+                if token_start == 0 and token_end == 0:
+                    continue
+                
+                # Adjust to document-relative offsets (as in original version)
+                token_start_rel = token_start - doc_offset
+                token_end_rel = token_end - doc_offset
+                
+                # Check if this token belongs to any relevant chunk
+                for chunk_idx in rel_chunk_indices:
+                    if chunk_idx < len(chunk_positions):
+                        chunk_start, chunk_end = chunk_positions[chunk_idx]
                         
-                        # If this is likely part of the document
-                        if start > query_len:
-                            # Check against relevant chunks
-                            for chunk_idx in rel_chunk_indices:
-                                if chunk_idx < len(chunk_positions):
-                                    chunk_start, chunk_end = chunk_positions[chunk_idx]
-                                    # Adjust for document offset
-                                    doc_chunk_start = chunk_start
-                                    doc_chunk_end = chunk_end
-                                    
-                                    if start < doc_chunk_end and end > doc_chunk_start:
-                                        pruning_labels[idx, token_idx] = 1
-                                        break
+                        # Check if token overlaps with this chunk (using document-relative offsets)
+                        if token_start_rel < chunk_end and token_end_rel > chunk_start:
+                            pruning_labels[idx, token_idx] = 1  # Keep
+                            break
+            
+            # Mask tokens after document end with -100
+            for token_idx in range(doc_end_token, seq_length):
+                pruning_labels[idx, token_idx] = -100
         
         return pruning_labels

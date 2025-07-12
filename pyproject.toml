@@ -112,3 +112,8 @@ markers = [
     "slow: marks tests as slow",
     "custom: marks tests for third-party models with custom modules"
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.1",
+]

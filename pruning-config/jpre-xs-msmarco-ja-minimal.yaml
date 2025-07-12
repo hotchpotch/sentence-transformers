@@ -32,7 +32,7 @@ training_args:
   bf16: true
 
   # Other settings
-  dataloader_num_workers: 8
+  dataloader_num_workers: 11
   load_best_model_at_end: true
   num_train_epochs: 1
 

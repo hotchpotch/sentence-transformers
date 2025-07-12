@@ -56,7 +56,7 @@ class PruningEncoder(nn.Module):
         self,
         model_name_or_path: str,
         mode: str = "reranking_pruning",
-        num_labels: int = 1,
+        num_labels: int = 2,  # Number of labels for ranking head
         max_length: int = 512,
         device: Optional[str] = None,
         pruning_config: Optional[Dict[str, Any]] = None,
@@ -95,21 +95,58 @@ class PruningEncoder(nn.Module):
         
         # Mode-specific model initialization
         if mode == "reranking_pruning":
-            # Load config for ranking
-            self.config = AutoConfig.from_pretrained(
+            # First, load the original config to check existing num_labels
+            original_config = AutoConfig.from_pretrained(
                 model_name_or_path,
-                num_labels=num_labels,
-                cache_dir=cache_dir,
-                **model_args
+                cache_dir=cache_dir
             )
             
-            # Load ranking model
-            self.ranking_model = AutoModelForSequenceClassification.from_pretrained(
-                model_name_or_path,
-                config=self.config,
-                cache_dir=cache_dir,
-                **model_args
-            )
+            # Check if we need to adjust num_labels
+            original_num_labels = getattr(original_config, 'num_labels', None)
+            
+            if original_num_labels is not None and original_num_labels != num_labels:
+                logger.info(f"Model was trained with num_labels={original_num_labels}, but requested num_labels={num_labels}")
+                logger.info(f"Loading with original num_labels={original_num_labels} and will adapt as needed")
+                
+                # Load with original num_labels to avoid size mismatch
+                self.config = AutoConfig.from_pretrained(
+                    model_name_or_path,
+                    num_labels=original_num_labels,
+                    cache_dir=cache_dir,
+                    **model_args
+                )
+                
+                # Load ranking model with original config
+                self.ranking_model = AutoModelForSequenceClassification.from_pretrained(
+                    model_name_or_path,
+                    config=self.config,
+                    cache_dir=cache_dir,
+                    **model_args
+                )
+                
+                # Store both original and target num_labels
+                self._original_num_labels = original_num_labels
+                self.num_labels = num_labels
+                
+            else:
+                # Load normally if num_labels matches
+                self.config = AutoConfig.from_pretrained(
+                    model_name_or_path,
+                    num_labels=num_labels,
+                    cache_dir=cache_dir,
+                    **model_args
+                )
+                
+                self.ranking_model = AutoModelForSequenceClassification.from_pretrained(
+                    model_name_or_path,
+                    config=self.config,
+                    cache_dir=cache_dir,
+                    **model_args
+                )
+                
+                self._original_num_labels = num_labels
+                self.num_labels = num_labels
+            
             self.encoder = None  # Not used in this mode
             
         elif mode == "pruning_only":
@@ -145,10 +182,9 @@ class PruningEncoder(nn.Module):
         self.text_chunker = None
         
         # Activation function for ranking scores
-        if num_labels == 1:
-            self.activation_fn = nn.Sigmoid()
-        else:
-            self.activation_fn = nn.Identity()
+        # Note: For training, we use raw logits (no activation)
+        # For inference, we may apply sigmoid/softmax
+        self.use_raw_logits = True  # Use raw logits for MSE loss
         
         # Move to device
         self.to(self.device)
@@ -324,12 +360,17 @@ class PruningEncoder(nn.Module):
                 outputs = self.forward(**encoded)
                 logits = outputs["ranking_logits"]
                 
-                # Apply activation
-                if self.num_labels == 1:
-                    scores = self.activation_fn(logits).squeeze(-1)
+                # Apply activation for inference
+                # Handle different num_labels configurations
+                if logits.shape[-1] == 2:
+                    # 2-class classification: use first class score
+                    scores = logits[:, 0]
+                elif logits.shape[-1] == 1:
+                    # Single output regression
+                    scores = logits.squeeze(-1)
                 else:
-                    scores = torch.nn.functional.softmax(logits, dim=-1)
-                    scores = scores[:, 1]  # Positive class
+                    # Multi-class: use first class
+                    scores = logits[:, 0]
                 
                 all_scores.extend(scores.cpu().tolist())
         
@@ -407,10 +448,16 @@ class PruningEncoder(nn.Module):
                 # Get predictions
                 if self.mode == "reranking_pruning":
                     ranking_logits = outputs["ranking_logits"]
-                    if self.num_labels == 1:
-                        ranking_scores = self.activation_fn(ranking_logits).squeeze(-1)
+                    # Handle different num_labels configurations
+                    if ranking_logits.shape[-1] == 2:
+                        # 2-class classification: use first class score
+                        ranking_scores = ranking_logits[:, 0]
+                    elif ranking_logits.shape[-1] == 1:
+                        # Single output regression
+                        ranking_scores = ranking_logits.squeeze(-1)
                     else:
-                        ranking_scores = torch.nn.functional.softmax(ranking_logits, dim=-1)[:, 1]
+                        # Multi-class: use first class
+                        ranking_scores = ranking_logits[:, 0]
                 else:
                     # No ranking scores in pruning_only mode
                     ranking_scores = torch.zeros(len(batch), device=self.device)
@@ -580,10 +627,16 @@ class PruningEncoder(nn.Module):
                 # Get predictions
                 if self.mode == "reranking_pruning":
                     ranking_logits = outputs["ranking_logits"]
-                    if self.num_labels == 1:
-                        ranking_scores = self.activation_fn(ranking_logits).squeeze(-1)
+                    # Handle different num_labels configurations
+                    if ranking_logits.shape[-1] == 2:
+                        # 2-class classification: use first class score
+                        ranking_scores = ranking_logits[:, 0]
+                    elif ranking_logits.shape[-1] == 1:
+                        # Single output regression
+                        ranking_scores = ranking_logits.squeeze(-1)
                     else:
-                        ranking_scores = torch.nn.functional.softmax(ranking_logits, dim=-1)[:, 1]
+                        # Multi-class: use first class
+                        ranking_scores = ranking_logits[:, 0]
                 else:
                     # No ranking scores in pruning_only mode
                     ranking_scores = torch.zeros(len(batch), device=self.device)
@@ -829,7 +882,8 @@ class PruningEncoder(nn.Module):
             "num_labels": self.num_labels,
             "max_length": self.max_length,
             "pruning_config": self.pruning_head.config.to_dict(),
-            "architecture": "PruningEncoder"
+            "architecture": "PruningEncoder",
+            "_original_num_labels": getattr(self, '_original_num_labels', self.num_labels)
         }
         
         with open(save_directory / "pruning_encoder_config.json", "w") as f:
@@ -846,7 +900,7 @@ class PruningEncoder(nn.Module):
             "base_model_name_or_path": self.model_name_or_path,
             "pruning_config": self.pruning_head.config.to_dict(),
             "max_length": self.max_length,
-            "num_labels": 1 if self.mode == "reranking_pruning" else 2,
+            "num_labels": self.num_labels,  # Save actual num_labels
             "architectures": [
                 "PruningEncoderForSequenceClassification" if self.mode == "reranking_pruning" 
                 else "PruningEncoderForTokenClassification"
