@@ -5,7 +5,7 @@ model_args:
 data_args:
   dataset_name: "hotchpotch/wip-msmarco-context-relevance"
   subset: "msmarco-ja-small"
-  teacher_model_name: "japanese-reranker-xsmall-v2"
+  teacher_column: "teacher_scores.japanese-reranker-xsmall-v2"
 
 training_args:
   overwrite_output_dir: true

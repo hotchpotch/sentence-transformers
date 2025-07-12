@@ -38,9 +38,10 @@ from pathlib import Path
 from typing import Dict, Any, Optional, Union, Tuple, List
 from dataclasses import dataclass, field
 from datetime import datetime
+from collections import defaultdict
 
 import torch
-from datasets import load_dataset, DatasetDict
+from datasets import load_dataset, DatasetDict, concatenate_datasets
 from transformers import (
     TrainingArguments,
     HfArgumentParser,
@@ -112,6 +113,10 @@ class DataArguments:
     teacher_model_name: Optional[str] = field(
         default=None,
         metadata={"help": "Teacher model name for score column. If None, extracted from config path."}
+    )
+    datasets: Optional[List[Dict[str, str]]] = field(
+        default=None,
+        metadata={"help": "List of datasets with their teacher columns for multi-dataset training"}
     )
     max_train_samples: Optional[int] = field(
         default=None,
@@ -218,26 +223,107 @@ def prepare_dataset(
         teacher_model_name: Name of the teacher model for score column (unused, passed to DataCollator)
         seed: Random seed for splitting
     """
-    # Load dataset from HuggingFace
-    logger.info(f"Loading dataset: {data_args.dataset_name}:{data_args.subset}")
-    dataset = load_dataset(data_args.dataset_name, data_args.subset)
+    # Check if we have multiple datasets
+    if data_args.datasets:
+        logger.info(f"Loading {len(data_args.datasets)} datasets for concatenation")
+        train_datasets = []
+        eval_datasets = []
+        
+        for dataset_config in data_args.datasets:
+            dataset_name = dataset_config.get('dataset_name')
+            subset = dataset_config.get('subset')
+            teacher_column = dataset_config.get('teacher_column', f'teacher_scores.{teacher_model_name}')
+            
+            logger.info(f"Loading dataset: {dataset_name}:{subset}")
+            dataset = load_dataset(dataset_name, subset)
+            
+            # Process train dataset
+            train_ds = dataset['train']
+            
+            # Rename teacher column to unified name
+            if teacher_column != 'teacher_score' and teacher_column in train_ds.column_names:
+                logger.info(f"Renaming {teacher_column} to teacher_score")
+                train_ds = train_ds.rename_column(teacher_column, 'teacher_score')
+            
+            train_datasets.append(train_ds)
+            
+            # Process eval dataset if exists
+            if 'validation' in dataset:
+                eval_ds = dataset['validation']
+                if teacher_column != 'teacher_score' and teacher_column in eval_ds.column_names:
+                    eval_ds = eval_ds.rename_column(teacher_column, 'teacher_score')
+                eval_datasets.append(eval_ds)
+            elif 'test' in dataset:
+                eval_ds = dataset['test']
+                if teacher_column != 'teacher_score' and teacher_column in eval_ds.column_names:
+                    eval_ds = eval_ds.rename_column(teacher_column, 'teacher_score')
+                eval_datasets.append(eval_ds)
+        
+        # Get common columns for concatenation
+        if train_datasets:
+            # Find common columns across all datasets
+            common_columns = set(train_datasets[0].column_names)
+            for ds in train_datasets[1:]:
+                common_columns = common_columns.intersection(set(ds.column_names))
+            
+            # Ensure required columns are present
+            required_columns = {'query', 'positive', 'negative', 'context_spans', 'context_spans_relevance', 'teacher_score'}
+            
+            # Filter to common columns that actually exist
+            existing_columns = []
+            for col in common_columns:
+                if all(col in ds.column_names for ds in train_datasets):
+                    existing_columns.append(col)
+            
+            # Make sure we have the essential columns
+            essential_columns = ['query', 'positive', 'negative', 'teacher_score']
+            for col in essential_columns:
+                if col not in existing_columns and all(col in ds.column_names for ds in train_datasets):
+                    existing_columns.append(col)
+            
+            # Add context columns if they exist in all datasets
+            for col in ['context_spans', 'context_spans_relevance']:
+                if col not in existing_columns and all(col in ds.column_names for ds in train_datasets):
+                    existing_columns.append(col)
+            
+            logger.info(f"Using columns: {sorted(existing_columns)}")
+            train_datasets = [ds.select_columns(existing_columns) for ds in train_datasets]
+            
+            # Concatenate datasets
+            train_dataset = concatenate_datasets(train_datasets)
+            logger.info(f"Concatenated train dataset size: {len(train_dataset)}")
+        else:
+            train_dataset = None
+            
+        # Handle eval datasets
+        if eval_datasets:
+            # Filter to same columns as train datasets
+            eval_datasets = [ds.select_columns(existing_columns) for ds in eval_datasets if all(col in ds.column_names for col in existing_columns)]
+            eval_dataset = concatenate_datasets(eval_datasets) if eval_datasets else None
+        else:
+            eval_dataset = None
+            
+    else:
+        # Single dataset mode (backward compatibility)
+        logger.info(f"Loading dataset: {data_args.dataset_name}:{data_args.subset}")
+        dataset = load_dataset(data_args.dataset_name, data_args.subset)
+        
+        # Get raw train dataset (let DataCollator handle processing)
+        train_dataset = dataset['train']
+        eval_dataset = None
     
-    # Get raw train dataset (let DataCollator handle processing)
-    train_dataset = dataset['train']
-    
-    # Handle validation set
-    eval_dataset = None
-    
-    # Try to use existing validation set first (prioritize validation over test)
-    if data_args.validation_split_name in dataset:
-        logger.info(f"Using existing validation set: '{data_args.validation_split_name}'")
-        eval_dataset = dataset[data_args.validation_split_name]
-    elif 'validation' in dataset:
-        logger.info("Using existing validation set: 'validation'")
-        eval_dataset = dataset['validation']
+    # Continue with validation set handling for single dataset mode
+    if not data_args.datasets:
+        # Try to use existing validation set first (prioritize validation over test)
+        if data_args.validation_split_name in dataset:
+            logger.info(f"Using existing validation set: '{data_args.validation_split_name}'")
+            eval_dataset = dataset[data_args.validation_split_name]
+        elif 'validation' in dataset:
+            logger.info("Using existing validation set: 'validation'")
+            eval_dataset = dataset['validation']
     
     # If no validation set found or split is explicitly specified, create split
-    if eval_dataset is None or data_args.validation_split is not None or data_args.validation_split_samples is not None:
+    if not data_args.datasets and (eval_dataset is None or data_args.validation_split is not None or data_args.validation_split_samples is not None):
         if data_args.validation_split_samples is not None:
             # Use absolute number of samples
             if data_args.validation_split_samples <= 0 or data_args.validation_split_samples >= len(train_dataset):
@@ -387,7 +473,8 @@ def parse_config_file(config_file: str) -> Tuple[ModelArguments, DataArguments, 
         validation_split=data_config.get('validation_split', None),
         validation_split_samples=data_config.get('validation_split_samples', None),
         validation_split_name=data_config.get('validation_split_name', 'validation'),
-        preprocessing_num_workers=data_config.get('preprocessing_num_workers', None)
+        preprocessing_num_workers=data_config.get('preprocessing_num_workers', None),
+        datasets=data_config.get('datasets', None)
     )
     
     # Extract training arguments
@@ -653,7 +740,11 @@ def main():
     )
     
     # Create data collator with teacher score column and correct column names
-    teacher_score_column = f"teacher_scores.{teacher_model_name}"
+    if data_args.datasets:
+        # When using multiple datasets, we've renamed to 'teacher_score'
+        teacher_score_column = "teacher_score"
+    else:
+        teacher_score_column = f"teacher_scores.{teacher_model_name}"
     logger.info(f"Using teacher score column: {teacher_score_column}")
     data_collator = PruningDataCollator(
         tokenizer=model.tokenizer,
