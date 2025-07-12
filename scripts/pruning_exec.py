@@ -14,8 +14,9 @@ Example:
 
 import argparse
 import sys
+import json
 from pathlib import Path
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 import numpy as np
 import torch
 from transformers import AutoTokenizer
@@ -34,57 +35,42 @@ def format_context_with_del(context: str, should_delete: bool) -> str:
         return context
 
 
-def sentence_rounding_provence(probabilities: np.ndarray, start_pos: int, end_pos: int, threshold: float) -> bool:
-    """
-    Provence-style sentence rounding: use average score for the entire sentence.
+def process_json_input(json_file: str, model_path: str, thresholds: List[float], use_majority: bool, batch_size: int):
+    """Process multiple query-context pairs from JSON file."""
+    with open(json_file, 'r', encoding='utf-8') as f:
+        data = json.load(f)
     
-    Args:
-        probabilities: Token-level keep probabilities
-        start_pos: Start position in the probability array
-        end_pos: End position in the probability array
-        threshold: Threshold for keeping the sentence
-        
-    Returns:
-        True if sentence should be kept, False if it should be deleted
-    """
-    # Get probabilities for this sentence
-    sentence_probs = probabilities[start_pos:end_pos]
-    
-    # Calculate average probability (Provence approach)
-    if len(sentence_probs) > 0:
-        avg_prob = np.mean(sentence_probs)
-        return avg_prob >= threshold
-    else:
-        # If no tokens, keep the sentence
-        return True
-
-
-def main():
-    parser = argparse.ArgumentParser(description='Execute pruning on query-context pairs')
-    parser.add_argument('-m', '--model', required=True, help='Path to the pruning model')
-    parser.add_argument('-q', '--query', required=True, help='Query text')
-    parser.add_argument('-c', '--contexts', nargs='+', required=True, help='List of context texts')
-    parser.add_argument('--thresholds', nargs='+', type=float, default=[0.3],
-                      help='Pruning thresholds (default: 0.3)')
-    parser.add_argument('--batch-size', type=int, default=32, help='Batch size for inference')
-    parser.add_argument('--use-majority', action='store_true', 
-                      help='Use majority voting instead of Provence-style averaging')
-    
-    args = parser.parse_args()
-    
-    # Load model
-    model = PruningEncoder.from_pretrained(args.model)
+    # Load model once
+    model = PruningEncoder.from_pretrained(model_path)
     model.eval()
     
+    results = []
+    
+    for item in data:
+        query = item['query']
+        contexts = item['contexts']
+        labels = item.get('labels', None)
+        
+        # Process this query-context pair
+        result = evaluate_single_example(model, query, contexts, thresholds, use_majority)
+        result['labels'] = labels
+        result['reasoning'] = item.get('reasoning', '')
+        results.append(result)
+    
+    return results
+
+
+def evaluate_single_example(model, query: str, contexts: List[str], thresholds: List[float], use_majority: bool) -> Dict:
+    """Evaluate a single query-context example."""
     # Ensure contexts end with period
-    contexts = []
-    for ctx in args.contexts:
+    processed_contexts = []
+    for ctx in contexts:
         if not ctx.endswith('。') and not ctx.endswith('.'):
             ctx = ctx + '。'
-        contexts.append(ctx)
+        processed_contexts.append(ctx)
     
     # Create single input: query [SEP] context1 context2 context3...
-    combined_text = args.query + model.tokenizer.sep_token + ''.join(contexts)
+    combined_text = query + model.tokenizer.sep_token + ''.join(processed_contexts)
     
     # Tokenize
     encoding = model.tokenizer(
@@ -134,8 +120,12 @@ def main():
             sep_positions.append(i)
     
     if not sep_positions:
-        print("Error: Could not find SEP token")
-        return
+        return {
+            'query': query,
+            'contexts': contexts,
+            'error': 'Could not find SEP token',
+            'predictions': {}
+        }
     
     # Context starts after the first SEP token
     context_start = sep_positions[0] + 1
@@ -157,43 +147,185 @@ def main():
             current_text = ""
     
     # Ensure we have the right number of boundaries
-    if len(context_boundaries) > len(contexts) + 1:
-        context_boundaries = context_boundaries[:len(contexts) + 1]
+    if len(context_boundaries) > len(processed_contexts) + 1:
+        context_boundaries = context_boundaries[:len(processed_contexts) + 1]
     
     # Process each threshold
-    for threshold in args.thresholds:
-        formatted_contexts = []
+    predictions_by_threshold = {}
+    
+    for threshold in thresholds:
+        predictions = []
         
         # Calculate keep/delete for each context
-        for i, context in enumerate(contexts):
+        for i, context in enumerate(processed_contexts):
             if i < len(context_boundaries) - 1:
                 start_pos = context_boundaries[i]
                 end_pos = context_boundaries[i + 1]
                 
-                if args.use_majority:
+                if use_majority:
                     # Original majority voting approach
                     context_probs = pruning_probs[start_pos:end_pos]
                     kept_tokens = np.sum(context_probs >= threshold)
                     total_tokens = len(context_probs)
-                    is_deleted = kept_tokens < (total_tokens / 2)
+                    is_kept = kept_tokens >= (total_tokens / 2)
                 else:
                     # Provence-style averaging approach
                     is_kept = sentence_rounding_provence(
                         pruning_probs, start_pos, end_pos, threshold
                     )
-                    is_deleted = not is_kept
                 
-                formatted_context = format_context_with_del(context, is_deleted)
-                formatted_contexts.append(formatted_context)
+                predictions.append(1 if is_kept else 0)
             else:
                 # If we couldn't determine boundaries, keep the context
-                formatted_contexts.append(context)
+                predictions.append(1)
         
-        # Print simple format
-        if ranking_score is not None:
-            print(f"th: {threshold}, q: {args.query}, score: {ranking_score:.2f}, contexts: {' '.join(formatted_contexts)}")
-        else:
-            print(f"th: {threshold}, q: {args.query}, contexts: {' '.join(formatted_contexts)}")
+        predictions_by_threshold[threshold] = predictions
+    
+    return {
+        'query': query,
+        'contexts': contexts,
+        'ranking_score': ranking_score,
+        'predictions': predictions_by_threshold
+    }
+
+
+def sentence_rounding_provence(probabilities: np.ndarray, start_pos: int, end_pos: int, threshold: float) -> bool:
+    """
+    Provence-style sentence rounding: use average score for the entire sentence.
+    
+    Args:
+        probabilities: Token-level keep probabilities
+        start_pos: Start position in the probability array
+        end_pos: End position in the probability array
+        threshold: Threshold for keeping the sentence
+        
+    Returns:
+        True if sentence should be kept, False if it should be deleted
+    """
+    # Get probabilities for this sentence
+    sentence_probs = probabilities[start_pos:end_pos]
+    
+    # Calculate average probability (Provence approach)
+    if len(sentence_probs) > 0:
+        avg_prob = np.mean(sentence_probs)
+        return avg_prob >= threshold
+    else:
+        # If no tokens, keep the sentence
+        return True
+
+
+def main():
+    parser = argparse.ArgumentParser(description='Execute pruning on query-context pairs')
+    parser.add_argument('-m', '--model', required=True, help='Path to the pruning model')
+    
+    # Input options
+    input_group = parser.add_mutually_exclusive_group(required=True)
+    input_group.add_argument('-q', '--query', help='Query text')
+    input_group.add_argument('-j', '--json', help='Path to JSON file with query-context pairs')
+    
+    parser.add_argument('-c', '--contexts', nargs='+', help='List of context texts (required with -q)')
+    parser.add_argument('--thresholds', nargs='+', type=float, default=[0.3],
+                      help='Pruning thresholds (default: 0.3)')
+    parser.add_argument('--batch-size', type=int, default=32, help='Batch size for inference')
+    parser.add_argument('--use-majority', action='store_true', 
+                      help='Use majority voting instead of Provence-style averaging')
+    parser.add_argument('--output', help='Output JSON file for results (only with -j)')
+    
+    args = parser.parse_args()
+    
+    # Validate arguments
+    if args.query and not args.contexts:
+        parser.error("-q/--query requires -c/--contexts")
+    if args.output and not args.json:
+        parser.error("--output can only be used with -j/--json")
+    
+    if args.json:
+        # Process JSON input
+        results = process_json_input(args.json, args.model, args.thresholds, args.use_majority, args.batch_size)
+        
+        # Calculate statistics
+        for threshold in args.thresholds:
+            total = 0
+            correct = 0
+            tp = 0  # True Positives (correctly kept)
+            fp = 0  # False Positives (incorrectly kept)
+            tn = 0  # True Negatives (correctly deleted)
+            fn = 0  # False Negatives (incorrectly deleted)
+            
+            for result in results:
+                if result.get('labels') is not None and threshold in result['predictions']:
+                    predictions = result['predictions'][threshold]
+                    labels = result['labels']
+                    
+                    for pred, label in zip(predictions, labels):
+                        total += 1
+                        if pred == label:
+                            correct += 1
+                            if pred == 1:
+                                tp += 1
+                            else:
+                                tn += 1
+                        else:
+                            if pred == 1:
+                                fp += 1
+                            else:
+                                fn += 1
+            
+            # Calculate metrics
+            accuracy = correct / total if total > 0 else 0
+            precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+            recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+            f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+            f2 = 5 * precision * recall / (4 * precision + recall) if (4 * precision + recall) > 0 else 0
+            
+            print(f"\n=== Results for threshold {threshold} ===")
+            print(f"Total examples: {len(results)}")
+            print(f"Total contexts: {total}")
+            print(f"Accuracy: {accuracy:.4f} ({correct}/{total})")
+            print(f"Precision: {precision:.4f}")
+            print(f"Recall: {recall:.4f}")
+            print(f"F1 Score: {f1:.4f}")
+            print(f"F2 Score: {f2:.4f}")
+            print(f"Confusion Matrix:")
+            print(f"  TP (correctly kept): {tp}")
+            print(f"  FP (incorrectly kept): {fp}")
+            print(f"  TN (correctly deleted): {tn}")
+            print(f"  FN (incorrectly deleted): {fn}")
+        
+        # Save detailed results if output file specified
+        if args.output:
+            output_data = {
+                'model': args.model,
+                'thresholds': args.thresholds,
+                'use_majority': args.use_majority,
+                'results': results
+            }
+            with open(args.output, 'w', encoding='utf-8') as f:
+                json.dump(output_data, f, ensure_ascii=False, indent=2)
+            print(f"\nDetailed results saved to: {args.output}")
+    
+    else:
+        # Single query-context processing (original behavior)
+        model = PruningEncoder.from_pretrained(args.model)
+        model.eval()
+        
+        result = evaluate_single_example(model, args.query, args.contexts, args.thresholds, args.use_majority)
+        
+        # Print results for each threshold
+        for threshold in args.thresholds:
+            formatted_contexts = []
+            predictions = result['predictions'].get(threshold, [])
+            
+            for i, (context, pred) in enumerate(zip(args.contexts, predictions)):
+                if pred == 0:  # Deleted
+                    formatted_contexts.append(f"<del>{context}</del>")
+                else:
+                    formatted_contexts.append(context)
+            
+            if result['ranking_score'] is not None:
+                print(f"th: {threshold}, q: {args.query}, score: {result['ranking_score']:.2f}, contexts: {' '.join(formatted_contexts)}")
+            else:
+                print(f"th: {threshold}, q: {args.query}, contexts: {' '.join(formatted_contexts)}")
 
 
 if __name__ == "__main__":
