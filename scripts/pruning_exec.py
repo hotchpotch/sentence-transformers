@@ -3,9 +3,21 @@
 CLI tool for text pruning using PruningEncoder models.
 
 Usage:
+    # Evaluate with default test data
+    python scripts/pruning_exec.py -m model_path
+    
+    # Evaluate with custom JSON file
+    python scripts/pruning_exec.py -m model_path -j custom_test.json
+    
+    # Single query evaluation
     python scripts/pruning_exec.py -m model_path -q "query" -c "context1" "context2" ...
     
 Example:
+    # Use default evaluation data (pruning-config/pruning_data_ja.json)
+    python scripts/pruning_exec.py \
+        -m ./output/pruning-models/model/final_model
+        
+    # Single query example
     python scripts/pruning_exec.py \
         -m ./output/pruning-models/model/final_model \
         -q "What is machine learning?" \
@@ -219,7 +231,7 @@ def main():
     parser.add_argument('-m', '--model', required=True, help='Path to the pruning model')
     
     # Input options
-    input_group = parser.add_mutually_exclusive_group(required=True)
+    input_group = parser.add_mutually_exclusive_group()
     input_group.add_argument('-q', '--query', help='Query text')
     input_group.add_argument('-j', '--json', help='Path to JSON file with query-context pairs')
     
@@ -232,6 +244,15 @@ def main():
     parser.add_argument('--output', help='Output JSON file for results (only with -j)')
     
     args = parser.parse_args()
+    
+    # Set default JSON file if no input specified
+    if not args.query and not args.json:
+        default_json = Path(__file__).parent.parent / 'pruning-config' / 'pruning_data_ja.json'
+        if default_json.exists():
+            args.json = str(default_json)
+            print(f"Using default evaluation data: {args.json}")
+        else:
+            parser.error("No input specified. Use -q for single query or -j for JSON file.")
     
     # Validate arguments
     if args.query and not args.contexts:
