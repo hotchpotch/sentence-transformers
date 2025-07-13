@@ -11,15 +11,7 @@
       "Compared to other countries, European countries' VAT (Value Added Tax) is generally around 20%, and Japan's consumption tax rate is at a relatively low level.",
       "Considering the future progress of declining birthrate and aging population, further tax reform discussions are expected to continue to ensure the sustainability of the social security system."
     ],
-    "labels": [
-      1,
-      1,
-      1,
-      1,
-      1,
-      0,
-      1
-    ]
+    "labels": [0, 1, 1, 1, 0, 0, 0]
   },
   {
     "reasoning": "Technical article about reversing lists in Python. The 1st sentence is general Python features, not directly related. The 2nd sentence is a preamble about list operations, deletable. Sentences 3-6 are specific reverse methods (reverse(), slice [::-1], reversed()) which are core. The 7th sentence explains the importance of choosing between methods. The 8th sentence is general programming advice, deletable.",
@@ -34,16 +26,7 @@
       "These methods have different characteristics in terms of memory usage and execution speed, and it's important to use them appropriately according to the purpose.",
       "In programming, understanding multiple ways to achieve the same result and choosing the optimal method according to the situation is the key to writing good code."
     ],
-    "labels": [
-      0,
-      0,
-      1,
-      1,
-      1,
-      1,
-      1,
-      0
-    ]
+    "labels": [0, 0, 1, 1, 1, 1, 0, 0]
   },
   {
     "reasoning": "Transportation information article about Shinkansen travel from Tokyo to Osaka. The 1st sentence is about Japan's transportation network in general. The 2nd sentence is history of Tokaido Shinkansen, indirectly related. Sentences 3-5 are specific travel times (Nozomi 2h21m etc.) which are core information. The 6th sentence is fare information, important. The 7th sentence is operation frequency, important practical information. The 8th sentence is about onboard services, reference level.",
@@ -58,16 +41,7 @@
       "For travel between Tokyo and Osaka, frequent service from 6 AM to 9 PM can meet both business and tourism needs.",
       "Free Wi-Fi service and power outlets are available on board, creating an environment where travel time can be used effectively."
     ],
-    "labels": [
-      0,
-      0,
-      1,
-      1,
-      1,
-      1,
-      1,
-      0
-    ]
+    "labels": [0, 0, 1, 1, 0, 1, 0, 0]
   },
   {
     "reasoning": "Detailed article about cryptocurrency taxation. The 1st sentence is general discussion about digital asset investment, introduction part that might be kept. Sentences 2-3 are core information about taxation as miscellaneous income. The 4th sentence is specific tax rate numbers, important. Sentences 5-6 are important notes about loss offsetting and transaction taxation. The 7th sentence is reference information about National Tax Agency support. The 8th sentence is general investment advice, deletable.",
@@ -82,16 +56,7 @@
       "The National Tax Agency publishes cryptocurrency calculation sheet formats, allowing tax returns to be prepared based on annual transaction reports provided by exchanges.",
       "In investment, considering not only profits but total returns including taxes is important for long-term asset building."
     ],
-    "labels": [
-      1,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1,
-      0
-    ]
+    "labels": [0, 1, 1, 1, 1, 1, 0, 0]
   },
   {
     "reasoning": "Medical article about healthy diet methods. The 1st sentence is introduction about health consciousness in modern society. The 2nd sentence is important basic policy from medical perspective. Sentences 3-4 are specific methods for calorie setting and meal balance, core. The 5th sentence is specific exercise guidelines, important. The 6th sentence is about sleep importance, related but supplementary. The 7th sentence is warning against extreme methods, important. The 8th sentence is about professional support, reference level.",
@@ -106,16 +71,7 @@
       "Extreme carbohydrate restriction or single-food diets may show temporary weight loss but have high rebound risk and easily disrupt nutritional balance.",
       "To succeed in dieting, it is recommended to find a method suited to the individual while receiving advice from experts such as registered dietitians or doctors."
     ],
-    "labels": [
-      0,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1,
-      0
-    ]
+    "labels": [0, 1, 1, 1, 1, 0, 1, 0]
   },
   {
     "reasoning": "Medical information article about COVID-19 vaccine side effects. The 1st sentence is general discussion about infectious disease control. The 2nd sentence is background about vaccine rollout. Sentences 3-5 are specific side effect symptoms and duration, core information. The 6th sentence is anaphylaxis frequency, important safety information. The 7th sentence is medical facility response system, important. The 8th sentence is general advice about vaccination decisions, reference level.",
@@ -130,16 +86,7 @@
       "Therefore, medical facilities conduct 15-30 minutes of observation after vaccination and prepare emergency response systems including adrenaline preparations.",
       "Vaccination should be decided considering individual health conditions and underlying diseases, and it is recommended to consult a doctor if there are concerns."
     ],
-    "labels": [
-      0,
-      0,
-      1,
-      1,
-      1,
-      1,
-      1,
-      0
-    ]
+    "labels": [0, 0, 1, 1, 1, 1, 0, 0]
   },
   {
     "reasoning": "Technical explanation about AI image generation. The 1st sentence is general background about AI technology development. The 2nd sentence is introduction about progress in image generation. Sentences 3-6 are specific mechanisms of diffusion models (generation from noise, learning process, text conditioning) which are core. The 7th sentence is comparison with other methods, supplementary information. The 8th sentence is applications, not direct mechanism but worth keeping for importance.",
@@ -154,16 +101,7 @@
       "Compared to traditional GANs (Generative Adversarial Networks), diffusion models have stable training and can generate more diverse and high-quality images.",
       "This technology expands possibilities for efficiency improvement and new expressions in creative work across various fields including illustration, design work, and movie visual effects."
     ],
-    "labels": [
-      0,
-      0,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1
-    ]
+    "labels": [0, 0, 1, 1, 1, 1, 0, 0]
   },
   {
     "reasoning": "Social analysis article about Japan's declining birthrate and aging society. The 1st sentence is overview of problem severity. Sentences 2-3 are specific statistics (770,000 births, 29% aging rate), core information. The 4th sentence is impacts (labor shortage, social security costs), important. Sentences 5-6 are government measures and challenges, related information. The 7th sentence is future measures, indirectly related. The 8th sentence is international comparison, reference level but might be necessary for context.",
@@ -178,16 +116,7 @@
       "Future measures under consideration include expanding acceptance of foreign workers, promoting elderly labor participation through retirement age extension, and improving productivity through AI and robots.",
       "Other developed countries face similar challenges, but Japan's particularly rapid pace of change requires more swift and bold responses."
     ],
-    "labels": [
-      1,
-      1,
-      1,
-      1,
-      1,
-      0,
-      0,
-      1
-    ]
+    "labels": [0, 1, 1, 1, 0, 0, 0, 0]
   },
   {
     "reasoning": "Educational article about English listening learning methods. The 1st sentence is general discussion about need for English learning. The 2nd sentence is preamble about importance of listening. Sentences 3-5 are specific methods (shadowing, subtitle use, podcast use), core. The 6th sentence is study time guidelines, important. The 7th sentence is brain science supplementary explanation, interesting but not essential. The 8th sentence is importance of continuation, general but worth keeping.",
@@ -202,16 +131,7 @@
       "From a neuroscience perspective, it has been revealed that neural circuits processing phonological systems different from native language change plastically through repeated practice.",
       "The most important thing is to continue, and having the courage to move forward even with 60-70% comprehension rather than seeking perfection is the shortcut to improvement."
     ],
-    "labels": [
-      0,
-      0,
-      1,
-      1,
-      1,
-      1,
-      0,
-      1
-    ]
+    "labels": [0, 0, 1, 1, 1, 1, 0, 0]
   },
   {
     "reasoning": "Industry analysis article about EV charging infrastructure. The 1st sentence is background about automotive industry transformation. The 2nd sentence is important premise about EV adoption and charging infrastructure challenges. Sentences 3-4 are specific data about charger numbers and locations, core. The 5th sentence is actual charging times, important information. The 6th sentence is government targets, related information. The 7th sentence is technical challenges, important. The 8th sentence is future prospects, indirect but necessary for context.",
@@ -226,16 +146,7 @@
       "Technically, development of ultra-fast chargers of 150kW or more is progressing, aiming for charging completion in 10-15 minutes, but power supply system development is a challenge.",
       "In the future, more convenient charging methods such as wireless charging technology and charging-while-driving systems are expected to be realized."
     ],
-    "labels": [
-      0,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1,
-      0
-    ]
+    "labels": [0, 0, 1, 1, 1, 0, 0, 0]
   },
   {
     "reasoning": "Financial education article about stock investment analysis methods. The 1st sentence is social background about rising interest in investment. The 2nd sentence emphasizes importance of analysis, important premise. Sentences 3-5 are specific methods (financial statement analysis, growth evaluation, valuation indicators), core. The 6th sentence is qualitative analysis, important. The 7th sentence is risk management, related. The 8th sentence is general investment mindset, deletable.",
@@ -250,16 +161,7 @@
       "From a risk management perspective, practice diversified investment and it is recommended to limit investment in one stock to within 5-10% of total assets.",
       "It is important to understand that stock investment has no principal guarantee and to engage with a long-term perspective within the range of surplus funds."
     ],
-    "labels": [
-      0,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1,
-      0
-    ]
+    "labels": [0, 0, 1, 1, 1, 1, 0, 0]
   },
   {
     "reasoning": "Technical article about 5G low latency characteristics and applications. The 1st sentence is general discussion about importance of communication technology. The 2nd sentence is overview of 5G performance improvements. Sentences 3-4 are low latency under 1ms and applications (remote surgery, autonomous driving), core. Sentences 5-6 are specific use cases in factories and entertainment, important. The 7th sentence is technical challenges, related information. The 8th sentence is about security, not directly related but might be important for 5G deployment considerations.",
@@ -274,16 +176,7 @@
       "However, 5G millimeter waves have strong directionality and are weak against obstacles, requiring dense base station deployment even in urban areas, making infrastructure costs a challenge.",
       "Also, with the introduction of edge computing to realize ultra-low latency, distributed data management and security measures have become new considerations."
     ],
-    "labels": [
-      0,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1
-    ]
+    "labels": [0, 0, 1, 1, 1, 1, 0, 0]
   },
   {
     "reasoning": "Environmental article about ocean plastic waste. The 1st sentence is general discussion about severity of environmental problems. The 2nd sentence is specific figure of 8 million tons annually, core. Sentences 3-4 are about microplastic formation and biological impacts, important. The 5th sentence is possibility of human impact, related. Sentences 6-7 are countermeasures (reduction, alternative materials, international cooperation), important. The 8th sentence is about impact on future generations, indirect but shows problem importance.",
@@ -298,16 +191,7 @@
       "Also, at the 2022 UN Environment Assembly, negotiations began toward creating a legally binding international treaty on plastic pollution.",
       "This problem cannot be solved by one country alone and is a global challenge requiring coordinated efforts by the international community to leave a healthy ocean environment for future generations."
     ],
-    "labels": [
-      0,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1
-    ]
+    "labels": [0, 1, 1, 1, 0, 1, 0, 0]
   },
   {
     "reasoning": "Health article about creating bedroom environment for quality sleep. The 1st sentence is background about sleep problems in modern people. The 2nd sentence is medical evidence about sleep importance, important premise. Sentences 3-6 are specific environmental settings (temperature/humidity, lighting, bedding), core information. The 7th sentence is about bedroom usage, important. The 8th sentence is about individual differences, supplementary but practically important.",
@@ -322,16 +206,7 @@
       "It's important to position the bedroom as a space exclusively for sleep, maintaining a relaxing environment without TVs, computers, or work-related documents.",
       "Since these environmental factors vary individually, keeping a sleep diary to confirm improvement effects and finding optimal conditions for yourself is also effective."
     ],
-    "labels": [
-      0,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1
-    ]
+    "labels": [0, 0, 1, 1, 1, 1, 0, 0]
   },
   {
     "reasoning": "Tax article about blue tax return for freelancers. The 1st sentence is social background about work style diversification. The 2nd sentence is premise about importance of tax processing. Sentences 3-6 are specific benefits of blue tax return (650,000 yen deduction, loss carryforward, family employee salary), core. The 7th sentence is procedural requirements, important. The 8th sentence is practical advice about accounting software. Difficult to judge sentences 1-2, not direct but might be necessary for context.",
@@ -346,16 +221,7 @@
       "To receive blue tax return benefits, you must submit a blue tax return approval application within 2 months of starting business and maintain double-entry bookkeeping.",
       "Currently, many user-friendly cloud accounting software are available, significantly streamlining bookkeeping work by linking with bank accounts and credit cards."
     ],
-    "labels": [
-      1,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1
-    ]
+    "labels": [0, 0, 1, 1, 1, 1, 1, 0]
   },
   {
     "reasoning": "Tech business article about metaverse business utilization. The 1st sentence is background about internet technology evolution. The 2nd sentence is important premise about metaverse definition and expectations. Sentences 3-6 are specific business deployment examples (virtual stores, meetings, avatar service, NFT utilization), core. The 7th sentence is challenges and constraints, important. The 8th sentence is success factors, related but somewhat general.",
@@ -370,16 +236,7 @@
       "However, many challenges remain for full-scale adoption including low VR device penetration, communication infrastructure development, and undeveloped regulations.",
       "Successful metaverse business requires not just imitation of reality but providing value unique to virtual spaces and forming user communities."
     ],
-    "labels": [
-      0,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1
-    ]
+    "labels": [0, 0, 1, 1, 1, 1, 0, 0]
   },
   {
     "reasoning": "Medical article about lifestyle habits for dementia prevention. The 1st sentence is background about social impact of dementia. The 2nd sentence is scientific evidence about preventability, important premise. Sentences 3-7 are specific prevention methods (exercise, social interaction, diet, intellectual activities, lifestyle disease management), core information. The 8th sentence is about importance of comprehensive approach, not individual methods but practically important so ambiguous.",
@@ -394,16 +251,7 @@
       "Also, since lifestyle diseases like hypertension, diabetes, and dyslipidemia are risk factors for dementia, their proper management also leads to dementia prevention.",
       "These prevention methods are expected to have synergistic effects when multiple methods are combined rather than practiced alone, and are said to be more effective the earlier they are started."
     ],
-    "labels": [
-      0,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1
-    ]
+    "labels": [0, 1, 1, 1, 1, 1, 1, 0]
   },
   {
     "reasoning": "Consumer guide article about choosing video streaming services. The 1st sentence is background about entertainment changes. The 2nd sentence is premise about importance of service selection. Sentences 3-7 are specific selection criteria (price and content, lineup, functionality, picture/sound quality, trial), core information. The 8th sentence is about cancellation flexibility, practically important. Overall lots of practical information, hard to delete.",
@@ -418,16 +266,7 @@
       "Many services offer about 1 month free trial periods, so it's recommended to actually use them to check interface usability and loading speed.",
       "Also, hopping between multiple services has become common, and flexible usage methods like contracting only when desired content is available are worth considering."
     ],
-    "labels": [
-      0,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1
-    ]
+    "labels": [0, 0, 1, 1, 1, 0, 1, 0]
   },
   {
     "reasoning": "Practical article about maintaining concentration while working from home. The 1st sentence is background about remote work spread during COVID. The 2nd sentence raises specific challenges of working from home. Sentences 3-7 are specific measures (workspace, boundary setting, time management, breaks, family rules), core information. The 8th sentence is about task visualization, supplementary but practically useful. Overall practical and hard to delete.",
@@ -442,16 +281,7 @@
       "If you have family, clearly share rules during work and minimize unnecessary interruptions by agreeing not to speak except in emergencies.",
       "Also, by reviewing completed tasks at day's end and planning for the next day, you can visualize work results and maintain motivation even at home."
     ],
-    "labels": [
-      0,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1
-    ]
+    "labels": [0, 0, 1, 1, 1, 1, 0, 0]
   },
   {
     "reasoning": "Technical review article about smartphone camera performance. The 1st sentence is background about smartphones becoming necessities. The 2nd sentence is overview of camera function evolution. Sentences 3-6 are specific technical evolution (multiple lenses, AI processing, image stabilization, sensor enlargement), core information. The 7th sentence is overall effect, important. The 8th sentence is future prospects, indirect but useful for technology trends.",
@@ -466,16 +296,7 @@
       "These technological innovations enable anyone to shoot high-quality photos suitable for social media just by deciding composition and pressing the shutter, without special knowledge.",
       "Future expectations include further technological innovations such as 8K video recording, real-time ray tracing, and holographic photography."
     ],
-    "labels": [
-      0,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1,
-      0
-    ]
+    "labels": [0, 0, 1, 1, 1, 1, 0, 0]
   },
   {
     "reasoning": "Economic article about effects of yen depreciation. The 1st sentence is general discussion about exchange rate impacts. The 2nd sentence is important premise about relationship between yen depreciation and import prices. Sentences 3-5 are specific impacts (food, energy, corporate price pass-through), core information. The 6th sentence is inflation pressure, important. The 7th sentence is benefits for export companies, opposite of import prices but important for overall picture of yen depreciation. The 8th sentence is difficulty of countermeasures, not direct but want to keep as realistic constraint.",
@@ -490,16 +311,7 @@
       "On the other hand, yen depreciation brings benefits of improved price competitiveness and increased sales in yen terms for export companies, contributing to manufacturing performance improvement.",
       "However, if wage increases don't keep up with price increases, decline in real purchasing power and impacts on citizens' lives are unavoidable, requiring policy responses."
     ],
-    "labels": [
-      0,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1
-    ]
+    "labels": [0, 1, 1, 1, 1, 1, 0, 0]
   },
   {
     "reasoning": "Educational policy article about elementary school programming education. The 1st sentence is background about educational digitalization. The 2nd sentence is important fact about 2020 mandatory implementation. The 3rd sentence is important supplement about implementation method in subjects. The 4th sentence is core about purpose being programming thinking. Sentences 5-6 are important concrete implementation examples. The 7th sentence is teacher training, implementation challenge. The 8th sentence is expected effects, somewhat general but important as educational goal.",
@@ -514,16 +326,7 @@
       "Training is also conducted for teachers to deepen understanding of programming education significance, teaching methods, and ICT device utilization methods.",
       "Through this education, children are expected to acquire the ability to logically analyze and solve problems, which will be necessary regardless of future occupation."
     ],
-    "labels": [
-      0,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1
-    ]
+    "labels": [0, 1, 0, 1, 1, 1, 0, 0]
   },
   {
     "reasoning": "Social welfare article about food banks. The 1st sentence is important about simultaneous solution of food loss and poverty. The 2nd sentence is core definition of food banks. Sentences 3-4 are important about specific mechanisms (corporate donations, distribution destinations). Sentences 5-6 are important about social significance (food loss reduction, poverty measures). The 7th sentence is operation system and community effects. The 8th sentence is challenges, somewhat indirect but necessary as realistic constraints.",
@@ -538,16 +341,7 @@
       "Operations are mainly supported by volunteers, and effects of strengthening community ties are emerging through food sorting and delivery work.",
       "However, food bank activities in Japan still have a short history, with challenges including establishing food safety management systems and securing sustainable operating funds."
     ],
-    "labels": [
-      1,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1
-    ]
+    "labels": [0, 1, 1, 1, 1, 1, 0, 0]
   },
   {
     "reasoning": "Educational methods article about improving online learning effects. The 1st sentence is background about educational digital transformation. The 2nd sentence raises challenges of online learning. Sentences 3-7 are specific measures to improve learning effects (environment setup, active learning, self-assessment, community participation), core information. The 8th sentence is importance of continuation, general but practically important. Overall practical content.",
@@ -562,16 +356,7 @@
       "Many online learning platforms have forum functions, and through questions and discussions, you can reduce loneliness and deepen understanding by interacting with other learners and instructors.",
       "Most important is habitualizing learning, and by studying at fixed times daily, you can realize continuous learning even online."
     ],
-    "labels": [
-      0,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1
-    ]
+    "labels": [0, 0, 1, 1, 1, 1, 0, 0]
   },
   {
     "reasoning": "Technical explanation article about NFT art mechanisms. The 1st sentence is background about blockchain applications. The 2nd sentence is important NFT definition. Sentences 3-4 are core technical mechanisms (identification information, original proof). The 5th sentence is important feature about smart contract royalties. The 6th sentence is platform explanation. The 7th sentence is important challenges and criticism. The 8th sentence is future potential, somewhat general.",
@@ -586,16 +371,7 @@
       "However, criticisms exist including environmental burden from massive power consumption needed to maintain blockchain and bubble concerns from speculative pricing.",
       "While overcoming technical challenges, development as a new revenue model for digital creators and method for preserving cultural assets is expected."
     ],
-    "labels": [
-      0,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1,
-      0
-    ]
+    "labels": [0, 1, 1, 1, 1, 0, 0, 0]
   },
   {
     "reasoning": "Policy article about regional revitalization migration promotion. The 1st sentence is challenge of regional population decline. The 2nd sentence is important premise about migration promotion measures. Sentences 3-6 are specific support measures (housing subsidies, child-rearing support, remote work, regional revitalization cooperation team), core. The 7th sentence is important success case (Kamiyama Town). The 8th sentence is challenges and prospects, somewhat general but necessary for overall policy picture.",
@@ -610,16 +386,7 @@
       "Kamiyama Town in Tokushima Prefecture, known as a success case, established high-speed internet environment, attracted 16 IT companies, and achieved social increase through migration by younger generations.",
       "However, challenges remain for sustainable settlement including securing post-migration work, integration into regional communities, and enhancement of medical and educational environments."
     ],
-    "labels": [
-      1,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1
-    ]
+    "labels": [0, 0, 1, 1, 1, 1, 1, 0]
   },
   {
     "reasoning": "Explanatory article about ChatGPT technical limitations. The 1st sentence is background about spread of large language models. The 2nd sentence is overview of training data. The 3rd sentence is important limitation of September 2021, core information. The 4th sentence is important about personal information handling. The 5th sentence is important about statistical inference limitations. The 6th sentence is usage precautions. The 7th sentence is importance of appropriate utilization. The 8th sentence is future development, indirect. Difficult to judge sentences 1 and 8.",
@@ -634,16 +401,7 @@
       "Users are required to understand AI characteristics and limitations and utilize it for appropriate purposes such as creative work assistance, idea organization, and learning support.",
       "In the future, improvements to these limitations are expected through learning with newer data and adding real-time information access functionality."
     ],
-    "labels": [
-      1,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1,
-      0
-    ]
+    "labels": [0, 0, 1, 1, 1, 1, 0, 0]
   },
   {
     "reasoning": "System explanation article about nursing care insurance service usage procedures. The 1st sentence is background about aging society nursing problems. The 2nd sentence is important premise about significance of nursing care insurance system. Sentences 3-6 are specific usage procedures (application, investigation, certification, care plan, service types), core information. The 7th sentence is important cost burden explanation. The 8th sentence is system revision trends, somewhat indirect but important information for users.",
@@ -658,16 +416,7 @@
       "Cost burden is 10% of usage fee in principle, but becomes 20% or 30% for those with certain income levels, and food and residence costs are self-paid for facility admission.",
       "As baby boomers will be 75+ in 2025, continuous review of benefits and burdens is being conducted to ensure system sustainability."
     ],
-    "labels": [
-      0,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1
-    ]
+    "labels": [0, 0, 1, 1, 1, 1, 1, 0]
   },
   {
     "reasoning": "Technical explanation article about quantum computer application fields. The 1st sentence positions it as new paradigm. The 2nd sentence is important premise about difference from conventional computers. Sentences 3-6 are specific areas of strength (combinatorial optimization, drug discovery, cryptanalysis, machine learning), core information. The 7th sentence is important caveat about limited application fields. The 8th sentence is about current status toward practical use, somewhat general but necessary for understanding technology status.",
@@ -682,16 +431,7 @@
       "However, quantum computers don't speed up all calculations but are limited to specific problems where quantum algorithms exist and quantum advantage is proven.",
       "Currently called the NISQ (Noisy Intermediate-Scale Quantum) era, research and development toward realizing practical quantum computers while overcoming error correction challenges is progressing."
     ],
-    "labels": [
-      0,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1
-    ]
+    "labels": [0, 0, 1, 1, 1, 1, 0, 0]
   },
   {
     "reasoning": "Agricultural technology article about IoT utilization in smart agriculture. The 1st sentence is background about technological innovation in agriculture. The 2nd sentence is important premise about smart agriculture and IoT sensor overview. Sentences 3-6 are specific use cases (sensor monitoring, drones, AI analysis, support for new farmers), core information. The 7th sentence is important about effect on aging countermeasures. The 8th sentence is future prospects, related but somewhat removed from specific IoT utilization.",
@@ -706,15 +446,6 @@
       "Also, introduction of power assist suits and robot agricultural machinery can significantly reduce physical burden on aging agricultural workers.",
       "Future expectations include realization of fully automated farms using 5G communication and wide-area growth management using satellite data, with further technological innovation expected."
     ],
-    "labels": [
-      0,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1,
-      0
-    ]
+    "labels": [0, 1, 1, 1, 1, 1, 0, 0]
   }
 ]
