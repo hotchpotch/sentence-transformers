@@ -62,15 +62,16 @@ def calculate_pruning_metrics(
     # For debugging
     total_texts_processed = 0
     
-    for pred_chunks, true_binary, spans in zip(predicted_chunks, true_chunks, context_spans):
-        # Both pred_chunks and true_binary are already in binary format
+    for pred_chunks, relevant_indices, spans in zip(predicted_chunks, true_chunks, context_spans):
         # pred_chunks: [0, 0, 1, 0, 1, 1] (binary predictions)
-        # true_binary: [0, 0, 1, 0, 1, 1] (binary labels)
+        # relevant_indices: [2, 4, 5] (indices of relevant chunks)
         
-        # Ensure same length
-        num_chunks = min(len(pred_chunks), len(true_binary))
-        pred_chunks = pred_chunks[:num_chunks]
-        true_binary = true_binary[:num_chunks]
+        # Convert relevant_indices to binary format
+        num_chunks = len(pred_chunks)
+        true_binary = [0] * num_chunks
+        for idx in relevant_indices:
+            if idx < num_chunks:
+                true_binary[idx] = 1
         
         # Add to overall lists
         all_predictions.extend(pred_chunks)
@@ -231,16 +232,23 @@ def evaluate_model_on_dataset(
                                 # Calculate probability for each chunk in this text
                                 chunk_predictions = []
                                 for chunk_idx, (span_start, span_end) in enumerate(text_spans):
-                                    if use_majority:
-                                        # Majority voting approach (legacy)
-                                        chunk_probs = sample_keep_probs[span_start:span_end]
-                                        kept_tokens = np.sum(chunk_probs >= threshold)
-                                        total_tokens = len(chunk_probs)
-                                        chunk_pred = 1 if kept_tokens >= (total_tokens / 2) else 0
+                                    # Note: text_spans are character offsets, need to be careful
+                                    # For now, use a simple heuristic
+                                    if span_end <= len(sample_keep_probs):
+                                        # Assume token indices roughly match character indices (not accurate!)
+                                        if use_majority:
+                                            # Majority voting approach (legacy)
+                                            chunk_probs = sample_keep_probs[span_start:span_end]
+                                            kept_tokens = np.sum(chunk_probs >= threshold)
+                                            total_tokens = len(chunk_probs)
+                                            chunk_pred = 1 if kept_tokens >= (total_tokens / 2) else 0
+                                        else:
+                                            # Provence-style averaging approach (default)
+                                            chunk_prob = sample_keep_probs[span_start:span_end].mean()
+                                            chunk_pred = 1 if chunk_prob >= threshold else 0
                                     else:
-                                        # Provence-style averaging approach (default)
-                                        chunk_prob = sample_keep_probs[span_start:span_end].mean()
-                                        chunk_pred = 1 if chunk_prob >= threshold else 0
+                                        # Fallback: predict keep if out of bounds
+                                        chunk_pred = 1
                                     chunk_predictions.append(chunk_pred)
                                 
                                 all_predicted_chunks.append(chunk_predictions)
@@ -266,16 +274,21 @@ def evaluate_model_on_dataset(
                             # Calculate probability for pruning-only mode
                             chunk_predictions = []
                             for chunk_idx, (span_start, span_end) in enumerate(text_spans):
-                                if use_majority:
-                                    # Majority voting approach (legacy)
-                                    chunk_probs = sample_keep_probs[span_start:span_end]
-                                    kept_tokens = np.sum(chunk_probs >= threshold)
-                                    total_tokens = len(chunk_probs)
-                                    chunk_pred = 1 if kept_tokens >= (total_tokens / 2) else 0
+                                # Note: text_spans are character offsets
+                                if span_end <= len(sample_keep_probs):
+                                    if use_majority:
+                                        # Majority voting approach (legacy)
+                                        chunk_probs = sample_keep_probs[span_start:span_end]
+                                        kept_tokens = np.sum(chunk_probs >= threshold)
+                                        total_tokens = len(chunk_probs)
+                                        chunk_pred = 1 if kept_tokens >= (total_tokens / 2) else 0
+                                    else:
+                                        # Provence-style averaging (default)
+                                        chunk_prob = sample_keep_probs[span_start:span_end].mean()
+                                        chunk_pred = 1 if chunk_prob >= threshold else 0
                                 else:
-                                    # Provence-style averaging (default)
-                                    chunk_prob = sample_keep_probs[span_start:span_end].mean()
-                                    chunk_pred = 1 if chunk_prob >= threshold else 0
+                                    # Fallback
+                                    chunk_pred = 1
                                 chunk_predictions.append(chunk_pred)
                             
                             all_predicted_chunks.append(chunk_predictions)

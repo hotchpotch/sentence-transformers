@@ -198,7 +198,23 @@ class PruningDataCollator:
             query = feature[self.query_column]
             texts = feature[self.texts_column]
             chunks_pos = feature[self.chunks_pos_column]
-            relevant_chunks = feature[self.relevant_chunks_column]
+            relevant_chunks_raw = feature[self.relevant_chunks_column]
+            
+            # Convert binary labels to indices if necessary
+            # If relevant_chunks contains binary labels [1, 0, 1], convert to indices [0, 2]
+            relevant_chunks = []
+            for text_idx, chunk_labels in enumerate(relevant_chunks_raw):
+                if isinstance(chunk_labels, list) and len(chunk_labels) > 0:
+                    # Check if it's binary labels (all values are 0 or 1)
+                    if all(label in [0, 1] for label in chunk_labels):
+                        # Convert binary labels to indices
+                        indices = [idx for idx, label in enumerate(chunk_labels) if label == 1]
+                        relevant_chunks.append(indices)
+                    else:
+                        # Already indices
+                        relevant_chunks.append(chunk_labels)
+                else:
+                    relevant_chunks.append(chunk_labels)
             
             # Handle labels based on mode
             if self.mode == "reranking_pruning":
@@ -369,10 +385,10 @@ class PruningDataCollator:
                 sep_positions = (token_ids == self._eos_token_id).nonzero(as_tuple=True)[0]
                 
                 
-                if len(sep_positions) >= 3:  # Need at least 3 </s> tokens for XLMRoberta
-                    # Document starts after first </s> + <s> (original working calculation)
+                if len(sep_positions) >= 2:  # Need at least 2 </s> tokens
+                    # Document starts after first </s> + <s> 
                     doc_start_token = sep_positions[0].item() + 2  # Skip </s> and <s>
-                    doc_end_token = sep_positions[2].item()  # Use the third </s> as document end
+                    doc_end_token = sep_positions[1].item()  # Use the second </s> as document end
                 else:
                     # Skip if we can't find proper boundaries
                     continue
