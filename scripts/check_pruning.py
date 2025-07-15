@@ -223,16 +223,26 @@ def analyze_pruning_simple(json_file, model_path, threshold=0.5, num_samples=10)
 
 def main():
     parser = argparse.ArgumentParser(description='Simple pruning visualization with correctness')
-    parser.add_argument('--json', default='pruning-config/pruning_data_ja.json',
-                        help='Path to JSON data file')
-    parser.add_argument('--model', required=True,
+    parser.add_argument('--json', '-j', default='pruning-config/pruning_data_ja.json',
+                        help='Path to JSON data file (default: pruning-config/pruning_data_ja.json)')
+    parser.add_argument('--model', '-m', required=True,
                         help='Path to trained PruningEncoder model')
-    parser.add_argument('--threshold', type=float, default=0.5,
+    parser.add_argument('--threshold', '-t', type=float, default=0.5,
                         help='Pruning threshold (default: 0.5)')
-    parser.add_argument('--samples', type=int, default=10,
+    parser.add_argument('--samples', '-s', type=int, default=10,
                         help='Number of samples to show (default: 10)')
     
     args = parser.parse_args()
+    
+    # Check if JSON file exists
+    json_path = Path(args.json)
+    if not json_path.exists():
+        print(f"Error: JSON file not found: {args.json}")
+        parser.print_help()
+        sys.exit(1)
+    
+    # Show which JSON file is being used
+    print(f"Using JSON file: {args.json}")
     
     analyze_pruning_simple(args.json, args.model, args.threshold, args.samples)
 
