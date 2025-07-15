@@ -34,6 +34,11 @@ uv run python tmp/sample.py   # tmpディレクトリのサンプルコード実
 # Pruning学習スクリプト
 python scripts/pruning_train.py pruning-config/train-models/japanese-reranker-xsmall-v2.yaml
 python scripts/pruning_train.py --model_name_or_path hotchpotch/japanese-reranker-xsmall-v2 --subset msmarco-ja-minimal
+
+# Pruning評価スクリプト
+python scripts/check_pruning.py -m output/model_path/final_model  # デフォルト日本語データ
+python scripts/check_pruning.py -j pruning-config/pruning_data_en.json -m output/model_path/final_model  # 英語データ
+python scripts/check_pruning.py -j pruning-config/pruning_data_easy_ja.json -m output/model_path/final_model -s 100 -t 0.5  # 簡易評価用データ
 ```
 
 ## アーキテクチャ概要
@@ -69,8 +74,10 @@ python scripts/pruning_train.py --model_name_or_path hotchpotch/japanese-reranke
      - `transformers_compat.py` - Transformers互換性ラッパー
      - `crossencoder_wrapper.py` - CrossEncoder互換ラッパー
      - `models/pruning_head.py` - PruningHead（プルーニング用ヘッド）
-   - `scripts/` - 学習スクリプト
+   - `scripts/` - 学習・評価スクリプト
      - `pruning_train.py` - 統合学習スクリプト（HfArgumentParser対応、YAML/JSON設定ファイルサポート）
+     - `check_pruning.py` - プルーニング効果の可視化スクリプト（削除/保持の正誤表示、F2スコア評価）
+     - `pruning_exec.py` - プルーニング実行とJSON評価（混合行列、F1/F2スコア計算）
    - `tests/pruning/` - テストスイート
      - `test_pruning_modes.py` - デュアルモード動作確認テスト
    - 学習済みモデル（6モデル）:

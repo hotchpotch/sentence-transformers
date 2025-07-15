@@ -2,6 +2,19 @@
 """
 Simple pruning effect visualization using PruningEncoder models.
 Shows results in format: query: {query} contexts: <del correct/incorrect>{deleted}</del> {kept}
+
+Usage examples:
+    # Default Japanese data
+    python scripts/check_pruning.py -m output/model_path/final_model
+    
+    # English data
+    python scripts/check_pruning.py -j pruning-config/pruning_data_en.json -m output/model_path/final_model
+    
+    # Easy Japanese data for quick evaluation
+    python scripts/check_pruning.py -j pruning-config/pruning_data_easy_ja.json -m output/model_path/final_model -s 100 -t 0.5
+    
+    # Custom data with specific settings
+    python scripts/check_pruning.py --json custom_data.json --model model_path --threshold 0.3 --samples 20
 """
 
 import json

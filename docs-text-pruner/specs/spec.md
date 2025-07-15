@@ -10,6 +10,7 @@
 - 2025-01-09: デュアルモードアーキテクチャ完成、F2評価結果更新、両モード対応のデータ構造実装
 - 2025-01-09: 全6モデル学習完了（pruning-only×3、reranking+pruning×3）、包括的な性能比較実施
 - 2025-01-09: Transformers互換性実装完了、5つの読み込み方法対応
+- 2025-01-15: 評価スクリプトcheck_pruning.py追加、プルーニング効果の可視化機能実装
 
 ## 概要
 
@@ -139,8 +140,10 @@ sentence_transformers/
 ├── utils/
 │   └── text_chunking.py        # 言語別文分割（実装済み）
 
-scripts/                         # 学習スクリプト
-└── train_pruning.py            # 統合学習スクリプト（YAML/JSON設定ファイル対応）
+scripts/                         # 学習・評価スクリプト
+├── pruning_train.py            # 統合学習スクリプト（YAML/JSON設定ファイル対応）
+├── check_pruning.py            # プルーニング効果可視化（削除/保持の正誤表示、F2スコア）
+└── pruning_exec.py             # プルーニング実行とJSON評価（混合行列、F1/F2スコア）
 
 tmp/old_scripts/                 # 評価・実験スクリプト（参考実装）
 ├── train_pruning_only_*.py     # pruning-onlyモード学習（minimal/small/full）
@@ -284,10 +287,35 @@ model = AutoModelForSequenceClassification.from_pretrained("path/to/model", trus
 - 自動登録: `sentence_transformers.__init__.py`で自動インポート
 - ベースモデル: `/ranking_model`サブディレクトリに完全なTransformersモデルとして保存
 
+## 評価スクリプト
+
+### check_pruning.py
+プルーニング効果を視覚的に確認するためのスクリプト。削除されるコンテキストを`<del correct/incorrect>`タグで表示し、モデルの判定精度を評価。
+
+```bash
+# 使用例
+python scripts/check_pruning.py -m output/model_path/final_model  # 日本語データ（デフォルト）
+python scripts/check_pruning.py -j pruning-config/pruning_data_en.json -m output/model_path/final_model  # 英語データ
+python scripts/check_pruning.py -j pruning-config/pruning_data_easy_ja.json -m output/model_path/final_model -s 100 -t 0.5  # 簡易評価用データ
+```
+
+**主な機能：**
+- 削除/保持の正誤をビジュアル表示
+- 混合行列とF1/F2スコア計算
+- FN（重要文書の誤削除）の検出と警告
+- 任意のJSONデータセットに対応
+
+### 評価結果の例（閾値0.5）
+- **削除率**: 17.9%（保守的な戦略）
+- **FN = 0**: 重要な文書を誤って削除していない
+- **F2 = 0.8929**: 高い再現率重視のスコア
+- **精度**: 69.2%
+
 ## 今後の課題
 
 1. **ドキュメント作成**: API仕様、使用例、ベンチマーク結果
 2. **PR準備**: コミュニティへの貢献準備
+3. **追加評価**: より大規模なデータセットでの評価
 
 ## 参考
 

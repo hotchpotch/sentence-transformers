@@ -19,6 +19,7 @@
 4. **jpre-xs-msmarco-ja-minimal** - xsmall-v2ベース（MSMARCO-JA minimal）
 5. **jpre-xs-msmarco-ja-small** - xsmall-v2ベース（MSMARCO-JA small）
 6. **jpre-base-msmarco-ja-small** - japanese-reranker-base-v1ベース（MSMARCO-JA small）
+7. **jpre-base-full-all** - japanese-reranker-base-v1ベース【新規追加】
 
 ### 拡張データセット仕様
 - **総クエリ数**: 188（技術・生活・Web記事等の多様な分野）
@@ -31,16 +32,17 @@
 
 | モデル | 最適閾値 | 圧縮率 | 誤削除率 | 誤保持率 | F2スコア | 実用性評価 | 保持数/削除数 |
 |--------|----------|--------|----------|----------|----------|------------|---------------|
-| **ruri-re310m-msmarco-small** | **0.3** | **18.9%** | **0.7%** | **63.3%** | **0.8804** | **新・最優秀** | 1132/264 |
+| **ruri-re310m-msmarco-small** | **0.3** | **18.9%** | **0.7%** | **63.3%** | **0.8804** | **最優秀** | 1132/264 |
 | jpre-base-small | 0.6 | 24.1% | 3.0% | 55.3% | 0.8760 | 高効率 | 1060/336 |
 | ruri-re310m | 0.6 | 16.6% | 0.7% | 67.8% | 0.8732 | 高安全性 | 1164/232 |
 | jpre-xs-small | 0.4 | 16.5% | 1.2% | 68.5% | 0.8690 | バランス型 | 1166/230 |
+| jpre-base-full | 0.5 | 16.4% | 1.3% | 69.1% | 0.8670 | 安定型 | 1169/227 |
 | jpre-xs-full | 0.3 | 15.5% | 1.4% | 70.8% | 0.8633 | 安定型 | 1180/216 |
 | jpre-xs-minimal | 0.4 | 12.1% | 1.3% | 77.3% | 0.8544 | 基本型 | 1227/169 |
 
 ## 主要な発見と技術的示唆
 
-### 1. ruri-re310m-msmarco-ja-smallが新たな最優秀モデルに
+### 1. ruri-re310m-msmarco-ja-smallが最優秀モデルに
 
 **MSMARCO-JA smallで学習したruriモデルの圧倒的性能**:
 - **最高F2スコア**: 0.8804（全モデル中首位）
@@ -64,30 +66,41 @@
 ### 3. モデル間の明確な性能差異
 
 **F2スコアランキング**:
-1. ruri-re310m-msmarco-small: 0.8804（【新】最優秀）
+1. ruri-re310m-msmarco-small: 0.8804（最優秀）
 2. jpre-base-small: 0.8760
 3. ruri-re310m: 0.8732
 4. jpre-xs-small: 0.8690
-5. jpre-xs-full: 0.8633
-6. jpre-xs-minimal: 0.8544
+5. jpre-base-full: 0.8670【新】
+6. jpre-xs-full: 0.8633
+7. jpre-xs-minimal: 0.8544
 
 **圧縮効率ランキング**:
 1. jpre-base-small: 24.1%（baseモデルの威力）
-2. ruri-re310m-msmarco-small: 18.9%（【新】バランス型）
+2. ruri-re310m-msmarco-small: 18.9%（バランス型）
 3. ruri-re310m: 16.6%（安全性重視）
 4. jpre-xs-small: 16.5%（xsモデル最良）
-5. jpre-xs-full: 15.5%
-6. jpre-xs-minimal: 12.1%（控えめだが安定）
+5. jpre-base-full: 16.4%【新】
+6. jpre-xs-full: 15.5%
+7. jpre-xs-minimal: 12.1%（控えめだが安定）
 
 **安全性ランキング（誤削除率）**:
 1. ruri-re310m: 0.7%（超安全）
-1. ruri-re310m-msmarco-small: 0.7%（【新】同率首位）
+1. ruri-re310m-msmarco-small: 0.7%（同率首位）
 3. jpre-xs-small: 1.2%
 4. jpre-xs-minimal: 1.3%
-5. jpre-xs-full: 1.4%
-6. jpre-base-small: 3.0%（効率とのトレードオフ）
+4. jpre-base-full: 1.3%【新】同率
+6. jpre-xs-full: 1.4%
+7. jpre-base-small: 3.0%（効率とのトレードオフ）
 
 ### 4. 大規模データセットでの新たな知見
+
+**jpre-base-fullモデルの追加評価**:
+- japanese-reranker-base-v1ベースで全データ（full-all）学習
+- F2スコア: 0.8670（第5位）
+- 圧縮率: 16.4%（baseモデルとしては控えめ）
+- 誤削除率: 1.3%（安全性重視）
+- 最適閾値: 0.5（バランス型）
+- baseモデルでも学習データ規模の違いで大きな性能差（small: 24.1% vs full: 16.4%圧縮率）
 
 **MSMARCO-JA small学習の効果**:
 - ruriモデルでもMSMARCO-JA small学習によりF2スコアが向上（0.8732→0.8804）
@@ -96,13 +109,14 @@
 
 **閾値戦略の最適化**:
 - 0.6: 効率性重視（jpre-base-small、ruri-re310m）
+- 0.5: バランス重視（jpre-base-full）【新】
 - 0.4: バランス重視（jpre-xs-small、jpre-xs-minimal）  
 - 0.3: 安全性最優先（ruri-re310m-msmarco-small、jpre-xs-full）
 
 ## 実用導入シナリオ別推奨
 
 ### シナリオ1: 総合性能最優先
-**推奨**: ruri-re310m-msmarco-ja-small（閾値0.3）【新推奨】
+**推奨**: ruri-re310m-msmarco-ja-small（閾値0.3）
 - **効果**: F2スコア0.8804で最高総合性能
 - **安全性**: 0.7%誤削除率で情報損失リスク最小
 - **用途例**: 医療・金融・法務等の高精度要求分野
@@ -196,7 +210,7 @@ ab_test_config = {
 
 ## 結論
 
-**大規模データセット（1396コンテキスト）での包括評価により、ruri-re310m-msmarco-ja-smallが新たな最優秀モデルとして確認されました。**
+**大規模データセット（1396コンテキスト）での包括評価により、7モデルの性能特性が明確になり、ruri-re310m-msmarco-ja-smallが最優秀モデルとして確認されました。**
 
 ### 主要な発見
 1. **最高F2スコア**: ruri-re310m-msmarco-smallが0.8804で首位
@@ -232,7 +246,7 @@ python scripts/pruning_exec.py \
     --thresholds 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9
 
 # 4. 他モデルとの性能比較
-for model in jpre-xs-small jpre-xs-minimal ruri-re310m jpre-xs-full; do
+for model in jpre-xs-small jpre-xs-minimal ruri-re310m jpre-xs-full jpre-base-full; do
     python scripts/pruning_exec.py -m output/${model}_*/final_model \
         --thresholds 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9
 done
