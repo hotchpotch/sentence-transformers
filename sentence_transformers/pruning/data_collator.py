@@ -206,12 +206,14 @@ class PruningDataCollator:
             for text_idx, chunk_labels in enumerate(relevant_chunks_raw):
                 if isinstance(chunk_labels, list) and len(chunk_labels) > 0:
                     # Check if it's binary labels (all values are 0 or 1)
-                    if all(label in [0, 1] for label in chunk_labels):
+                    # AND the length matches the number of chunks (indicating it's a binary mask)
+                    if (len(chunk_labels) == len(chunks_pos[text_idx]) and 
+                        all(label in [0, 1] for label in chunk_labels)):
                         # Convert binary labels to indices
                         indices = [idx for idx, label in enumerate(chunk_labels) if label == 1]
                         relevant_chunks.append(indices)
                     else:
-                        # Already indices
+                        # Already indices (or doesn't match expected format)
                         relevant_chunks.append(chunk_labels)
                 else:
                     relevant_chunks.append(chunk_labels)
@@ -256,13 +258,41 @@ class PruningDataCollator:
         offset_mappings = encoded_inputs.pop('offset_mapping')
         
         # Generate chunk-based pruning labels
-        pruning_labels = self._generate_chunk_based_labels(
-            encoded_inputs,
-            offset_mappings,
-            pairs,
-            pair_chunks_pos,
-            pair_relevant_chunks
-        )
+        # Try to use the improved method if possible
+        use_v2 = True
+        try:
+            logger.debug("Attempting to use v2 label generation method")
+            # Extract chunk texts from positions
+            pair_chunks_text = []
+            for i, (pair, chunk_positions) in enumerate(zip(pairs, pair_chunks_pos)):
+                query, document = pair
+                chunk_texts = []
+                for start, end in chunk_positions:
+                    # Extract chunk text from document using character positions
+                    chunk_text = document[start:end]
+                    chunk_texts.append(chunk_text)
+                pair_chunks_text.append(chunk_texts)
+            
+            # Use improved method
+            logger.debug(f"Using v2 with chunks_text: {pair_chunks_text}")
+            logger.debug(f"Relevant chunks: {pair_relevant_chunks}")
+            pruning_labels = self._generate_chunk_based_labels_v2(
+                encoded_inputs,
+                pairs,
+                pair_chunks_text,
+                pair_relevant_chunks
+            )
+        except Exception as e:
+            # Fallback to original method if there's any issue
+            logger.warning(f"Falling back to v1 label generation: {e}")
+            use_v2 = False
+            pruning_labels = self._generate_chunk_based_labels(
+                encoded_inputs,
+                offset_mappings,
+                pairs,
+                pair_chunks_pos,
+                pair_relevant_chunks
+            )
         
         # Prepare labels in the format expected by PruningLoss
         max_docs = max(len(feature[self.texts_column]) for feature in features)
@@ -321,6 +351,67 @@ class PruningDataCollator:
             'sentence_features': [encoded_inputs],
             'labels': labels
         }
+    
+    def _generate_chunk_based_labels_v2(self,
+                                        encoded_inputs: Dict[str, torch.Tensor],
+                                        pairs: List[List[str]],
+                                        chunks_text: List[List[str]],
+                                        relevant_chunks: List[List[int]]) -> torch.Tensor:
+        """
+        Generate token-level pruning labels using improved span position calculation.
+        
+        This version uses progressive encoding to accurately determine token positions
+        for each span, handling tokenizer-specific behaviors correctly.
+        
+        Args:
+            encoded_inputs: Tokenized inputs
+            pairs: Original text pairs [query, document]
+            chunks_text: Text content of each chunk (list of spans for each pair)
+            relevant_chunks: Indices of relevant chunks
+            
+        Returns:
+            Token-level pruning labels tensor
+        """
+        batch_size = encoded_inputs['input_ids'].shape[0]
+        seq_length = encoded_inputs['input_ids'].shape[1]
+        
+        # Initialize with -100 (ignore in loss)
+        pruning_labels = torch.full((batch_size, seq_length), -100, dtype=torch.long)
+        
+        for idx in range(len(pairs)):
+            query, document = pairs[idx]
+            spans = chunks_text[idx]
+            rel_chunk_indices = relevant_chunks[idx]
+            
+            # Compute token positions for each span
+            span_positions = compute_span_token_positions(self.tokenizer, query, spans)
+            
+            # Validate the positions (optional, can be disabled in production)
+            if logger.isEnabledFor(logging.DEBUG):
+                is_valid = validate_span_tokenization(self.tokenizer, query, spans, span_positions)
+                if not is_valid:
+                    logger.debug(f"Span tokenization validation failed for pair {idx}")
+            
+            # Set labels based on relevant chunks
+            for chunk_idx in rel_chunk_indices:
+                if chunk_idx < len(span_positions):
+                    start_pos, end_pos = span_positions[chunk_idx]
+                    # Ensure we don't exceed sequence length
+                    start_pos = min(start_pos, seq_length)
+                    end_pos = min(end_pos, seq_length)
+                    # Set tokens in relevant chunks to 1 (keep)
+                    pruning_labels[idx, start_pos:end_pos] = 1
+            
+            # Set tokens in non-relevant chunks to 0 (prune)
+            for chunk_idx in range(len(span_positions)):
+                if chunk_idx not in rel_chunk_indices:
+                    start_pos, end_pos = span_positions[chunk_idx]
+                    # Ensure we don't exceed sequence length
+                    start_pos = min(start_pos, seq_length)
+                    end_pos = min(end_pos, seq_length)
+                    pruning_labels[idx, start_pos:end_pos] = 0
+        
+        return pruning_labels
     
     def _generate_chunk_based_labels(self,
                                      encoded_inputs: Dict[str, torch.Tensor],
@@ -432,3 +523,208 @@ class PruningDataCollator:
                 pruning_labels[idx, token_idx] = -100
         
         return pruning_labels
+
+
+def compute_span_token_positions(tokenizer, query: str, spans: List[str]) -> List[Tuple[int, int]]:
+    """
+    Compute the token positions for each span by progressively encoding the text.
+    
+    This method is more accurate than using character offsets because it handles
+    tokenizer-specific behaviors (like subword tokenization) correctly.
+    
+    Args:
+        tokenizer: HuggingFace tokenizer
+        query: Query text
+        spans: List of document spans/chunks
+        
+    Returns:
+        List of (start_token_idx, end_token_idx) tuples for each span within the full sequence
+        
+    Example:
+        >>> tokenizer = AutoTokenizer.from_pretrained("xlm-roberta-base")
+        >>> query = "What is machine learning?"
+        >>> spans = ["Machine learning is AI.", "It uses algorithms."]
+        >>> positions = compute_span_token_positions(tokenizer, query, spans)
+        >>> # positions = [(8, 15), (15, 21)]  # Token positions for each span
+    """
+    if not spans:
+        return []
+    
+    # Progressively build the text and encode each version
+    span_positions = []
+    
+    # Build progressive texts: query + span1, query + span1 + span2, etc.
+    progressive_texts = []
+    accumulated_text = ""
+    for i, span in enumerate(spans):
+        if i > 0:
+            # Add a space between spans to prevent tokenization issues
+            # This ensures "first span" + "second span" doesn't become "first spanssecond span"
+            accumulated_text += " "
+        accumulated_text += span
+        # Create the pair as the tokenizer would see it
+        progressive_texts.append([query, accumulated_text])
+    
+    # Batch encode all progressive texts
+    encodings = tokenizer(
+        progressive_texts,
+        add_special_tokens=True,
+        padding=False,
+        truncation=False,
+        return_offsets_mapping=False,
+        return_attention_mask=False
+    )
+    
+    # Find where document starts in the first encoding
+    # This handles different tokenizer formats (BERT, RoBERTa, etc.)
+    first_encoding = encodings['input_ids'][0]
+    
+    # Encode just the query to find where it ends
+    query_only = tokenizer(
+        [query],
+        add_special_tokens=True,
+        padding=False,
+        truncation=False,
+        return_offsets_mapping=False,
+        return_attention_mask=False
+    )
+    query_length = len(query_only['input_ids'][0])
+    
+    # Find the document start position (after query + separator tokens)
+    # The exact position depends on the tokenizer format
+    # Try encoding a query-document pair to find the pattern
+    test_pair = tokenizer(
+        [[query, "test"]],
+        add_special_tokens=True,
+        padding=False,
+        truncation=False,
+        return_offsets_mapping=False,
+        return_attention_mask=False
+    )
+    test_tokens = test_pair['input_ids'][0]
+    
+    # Find where "test" tokens start
+    test_only = tokenizer(
+        ["test"],
+        add_special_tokens=False,
+        padding=False,
+        truncation=False,
+        return_offsets_mapping=False,
+        return_attention_mask=False
+    )
+    test_token_ids = test_only['input_ids'][0]
+    
+    # Search for the test tokens in the full sequence
+    doc_start_offset = None
+    for i in range(query_length, len(test_tokens) - len(test_token_ids) + 1):
+        if test_tokens[i:i+len(test_token_ids)] == test_token_ids:
+            doc_start_offset = i
+            break
+    
+    if doc_start_offset is None:
+        # Fallback: assume document starts after query + 1 separator
+        doc_start_offset = query_length
+    
+    # Now compute span positions
+    prev_doc_length = 0
+    for i, encoding in enumerate(encodings['input_ids']):
+        # Get the current document text (with spaces between spans)
+        current_doc = ""
+        for j in range(i + 1):
+            if j > 0:
+                current_doc += " "
+            current_doc += spans[j]
+        
+        # Encode just the document to get its token length
+        doc_only = tokenizer(
+            [current_doc],
+            add_special_tokens=False,
+            padding=False,
+            truncation=False,
+            return_offsets_mapping=False,
+            return_attention_mask=False
+        )
+        current_doc_length = len(doc_only['input_ids'][0])
+        
+        # The span starts where the previous document ended
+        span_start = doc_start_offset + prev_doc_length
+        span_end = doc_start_offset + current_doc_length
+        
+        span_positions.append((span_start, span_end))
+        prev_doc_length = current_doc_length
+    
+    return span_positions
+
+
+def validate_span_tokenization(tokenizer, query: str, spans: List[str], 
+                             span_positions: List[Tuple[int, int]]) -> bool:
+    """
+    Validate that the computed span positions correctly map to the original spans.
+    
+    Args:
+        tokenizer: HuggingFace tokenizer
+        query: Query text
+        spans: List of document spans
+        span_positions: Computed token positions from compute_span_token_positions
+        
+    Returns:
+        True if the positions correctly decode to the original spans
+    """
+    # Encode the full text (with spaces between spans)
+    doc_text = ""
+    for i, span in enumerate(spans):
+        if i > 0:
+            doc_text += " "
+        doc_text += span
+    full_text = [query, doc_text]
+    encoding = tokenizer(
+        [full_text],
+        add_special_tokens=True,
+        padding=False,
+        truncation=False,
+        return_offsets_mapping=False,
+        return_attention_mask=False
+    )
+    
+    tokens = encoding['input_ids'][0]
+    
+    # Validate each span
+    for i, (span_text, (start_pos, end_pos)) in enumerate(zip(spans, span_positions)):
+        # Decode the tokens for this span
+        span_tokens = tokens[start_pos:end_pos]
+        decoded_text = tokenizer.decode(span_tokens, skip_special_tokens=True)
+        
+        # Normalize both texts (remove extra spaces, etc.)
+        normalized_original = " ".join(span_text.split())
+        normalized_decoded = " ".join(decoded_text.split())
+        
+        # For more flexible validation, also check lowercase versions
+        # This handles tokenizers like BERT that lowercase inputs
+        if normalized_original != normalized_decoded:
+            # Try case-insensitive comparison
+            if normalized_original.lower() == normalized_decoded.lower():
+                continue  # Accept case differences
+            
+            # For even more flexibility, check if the decoded text contains
+            # the essential parts of the original (handling subword tokenization)
+            original_words = normalized_original.lower().split()
+            decoded_words = normalized_decoded.lower().split()
+            
+            # Check if all original words appear in decoded (allowing for subword splits)
+            decoded_text_lower = normalized_decoded.lower().replace(" ", "")
+            all_found = True
+            for word in original_words:
+                if word.lower() not in decoded_text_lower:
+                    all_found = False
+                    break
+            
+            if not all_found:
+                logger.warning(
+                    f"Span {i} mismatch:\n"
+                    f"  Original: '{normalized_original}'\n" 
+                    f"  Decoded:  '{normalized_decoded}'\n"
+                    f"  Positions: {start_pos}-{end_pos}"
+                )
+                return False
+    
+    return True
