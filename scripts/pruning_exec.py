@@ -74,6 +74,7 @@ def process_json_input(json_file: str, model_path: str, thresholds: List[float],
 
 def evaluate_single_example(model, query: str, contexts: List[str], thresholds: List[float], use_majority: bool) -> Dict:
     """Evaluate a single query-context example."""
+    # ===== 1. コンテキストの前処理: 各コンテキストが句点で終わることを保証 =====
     # Ensure contexts end with period
     processed_contexts = []
     for ctx in contexts:
@@ -81,9 +82,11 @@ def evaluate_single_example(model, query: str, contexts: List[str], thresholds: 
             ctx = ctx + '。'
         processed_contexts.append(ctx)
     
+    # ===== 2. 入力テキストの構築: クエリ + [SEP] + 全コンテキストの連結 =====
     # Create single input: query [SEP] context1 context2 context3...
     combined_text = query + model.tokenizer.sep_token + ''.join(processed_contexts)
     
+    # ===== 3. トークナイズ処理: テキストをトークンIDに変換 =====
     # Tokenize
     encoding = model.tokenizer(
         combined_text,
@@ -93,9 +96,11 @@ def evaluate_single_example(model, query: str, contexts: List[str], thresholds: 
         return_tensors='pt'
     )
     
+    # ===== 4. GPUへのデータ転送 =====
     # Move to device
     encoding = {k: v.to(model.device) for k, v in encoding.items()}
     
+    # ===== 5. モデル推論の実行 =====
     # Get predictions
     with torch.no_grad():
         outputs = model(
@@ -104,34 +109,42 @@ def evaluate_single_example(model, query: str, contexts: List[str], thresholds: 
             return_dict=True
         )
         
+        # ===== 6. モデルのモードに応じてスコアを取得 =====
         # Get scores based on mode
         if model.mode == "reranking_pruning":
+            # リランキング＋プルーニングモード: 両方のスコアを取得
             ranking_logits = outputs["ranking_logits"]
             ranking_score = torch.sigmoid(ranking_logits).cpu().item()
             pruning_logits = outputs["pruning_logits"]
         else:  # pruning_only
+            # プルーニングのみモード: プルーニングスコアのみ取得
             ranking_score = None
             pruning_logits = outputs["pruning_logits"]
         
+        # ===== 7. プルーニング確率の計算: ソフトマックスで確率分布に変換 =====
         # Get pruning probabilities
         # Apply softmax for proper probability distribution
         pruning_probs = torch.softmax(pruning_logits, dim=-1).cpu().numpy()
         
+        # ===== 8. 2値分類の場合、「保持」確率（インデックス1）を抽出 =====
         # If binary classification, take the "keep" probability (index 1)
         if pruning_probs.ndim == 3 and pruning_probs.shape[-1] == 2:
             pruning_probs = pruning_probs[0, :, 1]  # Shape: (seq_len,)
         else:
             pruning_probs = pruning_probs[0]  # Already (seq_len,)
     
+    # ===== 9. トークンIDをテキストトークンに変換（境界検出用） =====
     # Convert tokens to text to find context boundaries
     tokens = model.tokenizer.convert_ids_to_tokens(encoding['input_ids'][0])
     
+    # ===== 10. SEPトークンの位置を検索 =====
     # Find SEP token position
     sep_positions = []
     for i, token in enumerate(tokens):
         if token == model.tokenizer.sep_token:
             sep_positions.append(i)
     
+    # SEPトークンが見つからない場合はエラーを返す
     if not sep_positions:
         return {
             'query': query,
@@ -140,60 +153,76 @@ def evaluate_single_example(model, query: str, contexts: List[str], thresholds: 
             'predictions': {}
         }
     
+    # ===== 11. コンテキスト開始位置の特定: 最初のSEPトークンの後 =====
     # Context starts after the first SEP token
     context_start = sep_positions[0] + 1
     
+    # ===== 12. 各コンテキストの境界位置を検出 =====
     # Find context boundaries by looking for sentence endings
     context_boundaries = [context_start]
     current_text = ""
     
+    # トークンを順番に処理して文の区切り（句点）を探す
     for i in range(context_start, len(tokens)):
+        # 特殊トークンはスキップ
         if tokens[i] in ['<s>', '</s>', '<pad>', model.tokenizer.pad_token]:
             continue
             
+        # トークンをテキストに変換して累積
         token_text = model.tokenizer.convert_tokens_to_string([tokens[i]])
         current_text += token_text
         
+        # 句点（。または.）で終わっている場合、コンテキストの境界とする
         # Check if we've reached the end of a context
         if current_text.endswith('。') or current_text.endswith('.'):
             context_boundaries.append(i + 1)
             current_text = ""
     
+    # 境界の数が多すぎる場合は調整
     # Ensure we have the right number of boundaries
     if len(context_boundaries) > len(processed_contexts) + 1:
         context_boundaries = context_boundaries[:len(processed_contexts) + 1]
     
+    # ===== 13. 各閾値に対して予測を実行 =====
     # Process each threshold
     predictions_by_threshold = {}
     
     for threshold in thresholds:
         predictions = []
         
+        # ===== 14. 各コンテキストに対して保持/削除を判定 =====
         # Calculate keep/delete for each context
         for i, context in enumerate(processed_contexts):
             if i < len(context_boundaries) - 1:
+                # コンテキストの開始・終了位置を取得
                 start_pos = context_boundaries[i]
                 end_pos = context_boundaries[i + 1]
                 
                 if use_majority:
+                    # ===== 15a. 多数決方式: トークンの過半数が閾値以上なら保持 =====
                     # Original majority voting approach
                     context_probs = pruning_probs[start_pos:end_pos]
                     kept_tokens = np.sum(context_probs >= threshold)
                     total_tokens = len(context_probs)
                     is_kept = kept_tokens >= (total_tokens / 2)
                 else:
+                    # ===== 15b. Provence方式: トークンの平均確率で判定 =====
                     # Provence-style averaging approach
                     is_kept = sentence_rounding_provence(
                         pruning_probs, start_pos, end_pos, threshold
                     )
                 
+                # 保持なら1、削除なら0
                 predictions.append(1 if is_kept else 0)
             else:
+                # 境界が特定できない場合はデフォルトで保持
                 # If we couldn't determine boundaries, keep the context
                 predictions.append(1)
         
+        # 閾値ごとの予測結果を保存
         predictions_by_threshold[threshold] = predictions
     
+    # ===== 16. 結果を返す =====
     return {
         'query': query,
         'contexts': contexts,

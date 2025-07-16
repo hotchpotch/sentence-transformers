@@ -1,0 +1,362 @@
+[
+  {
+    "reasoning": "Asked about a gift for family, and the third sentence mentions choosing a blue scarf for mother. Others are daily events.",
+    "query": "What gift did you choose for your family?",
+    "contexts": [
+      "This morning I woke up early and read the newspaper while drinking coffee, thinking it's a good habit to start the day.",
+      "The weather was nice so I went for a walk to the park, where the cherry trees were beginning to bud and I could feel spring coming.",
+      "In the afternoon, I went to the department store to buy a blue scarf for my mother, and I'm satisfied that I chose a quality item.",
+      "I bought ingredients for dinner at the supermarket and decided to make ginger pork today.",
+      "In the evening, I prepared for tomorrow's work while watching a drama, feeling it was a fulfilling day."
+    ],
+    "labels": [0, 0, 1, 0, 0]
+  },
+  {
+    "reasoning": "Asked about how to contact a colleague, and the fourth sentence mentions Yamada-san's extension number. Others are work-related.",
+    "query": "Please tell me how to contact my colleague",
+    "contexts": [
+      "I had back-to-back meetings with clients from morning, so I had to have a quick lunch.",
+      "I spent time on final adjustments to the presentation materials and was able to make them more persuasive.",
+      "The team composition for the new project has been decided, and kickoff meetings are scheduled to start next week.",
+      "To contact Yamada-san, using extension 3456 is the fastest way, so please make a note of it.",
+      "I need to finish preparing for tomorrow's business trip to Osaka today, so it was a busy day."
+    ],
+    "labels": [0, 0, 0, 1, 0]
+  },
+  {
+    "reasoning": "Asked about cooking innovations, and the second sentence mentions adding chocolate as a secret ingredient. Others are unrelated.",
+    "query": "What did you do differently in today's cooking?",
+    "contexts": [
+      "Recently, I've been looking forward to trying new recipes on weekends.",
+      "I added a small amount of chocolate as a secret ingredient to today's curry, which gave it a deeper flavor.",
+      "I'm planning to go on a hot spring trip with friends next month and am already looking forward to it.",
+      "I cleaned my room and organized unnecessary books, which made the space much more spacious.",
+      "I'm thinking of waking up early tomorrow to go jogging, feeling once again that health comes first."
+    ],
+    "labels": [0, 1, 0, 0, 0]
+  },
+  {
+    "reasoning": "Asked about important schedules, and the fifth sentence specifies the exam date and time. Others are general study talk.",
+    "query": "Please let me confirm upcoming important schedules",
+    "contexts": [
+      "While studying at the library, I happened to meet a high school classmate and felt nostalgic.",
+      "I try to secure three hours of study time every day, realizing that persistence is power.",
+      "The new reference book is more difficult than expected, and I realized I need to start over from the basics.",
+      "Studying at cafes can be hit or miss for concentration, and I've realized that choosing the right place is important too.",
+      "An important exam will be held next Tuesday, so I need to prepare thoroughly."
+    ],
+    "labels": [0, 0, 0, 0, 1]
+  },
+  {
+    "reasoning": "Asked about a new shop, and the first sentence mentions information about a bakery in front of the station. Others are daily talk.",
+    "query": "Any information about newly opened shops in the neighborhood?",
+    "contexts": [
+      "The bakery that opened in front of the station specializes in natural yeast bread and is so popular that there are lines from morning.",
+      "The flexibility of my body is gradually improving with the yoga I started for health, and I'm feeling the effects.",
+      "I have plans to go see a movie with friends this weekend and am looking forward to the popular film.",
+      "The flowers in the garden are blooming beautifully, and I look forward to seeing them every morning.",
+      "I'm saving money this month for next month's travel fund, and I'm almost at my target amount."
+    ],
+    "labels": [1, 0, 0, 0, 0]
+  },
+  {
+    "reasoning": "Asked about pet habits, and the third sentence describes the morning behavior of their cat Mike. Others are general talk.",
+    "query": "Please tell me about your pet's daily behavior",
+    "contexts": [
+      "Since I started keeping a pet, my daily rhythm has become more regular and I feel a sense of responsibility has sprouted.",
+      "I've decided to go to the animal hospital for checkups every three months, thinking that health management is important.",
+      "My cat Mike comes to wake me up by licking my face every morning at 6 o'clock, so I think of her as a cute alarm clock.",
+      "Recently, online work has increased and commuting time has decreased, making things more efficient.",
+      "Weekend picnics at the nearby park have become routine, and I feel it's perfect for a change of pace."
+    ],
+    "labels": [0, 0, 1, 0, 0]
+  },
+  {
+    "reasoning": "Asked about tomorrow's schedule, and the second sentence shows the meeting time and location. Others are general work talk.",
+    "query": "Please tell me the details of tomorrow's schedule",
+    "contexts": [
+      "It's been a busy week with continuous overtime, and I understand it's because the project deadline is approaching.",
+      "Tomorrow's meeting will be held in Conference Room A at 2 PM, and the materials are ready.",
+      "Thanks to the new laptop, work efficiency has improved, and I feel the investment was worth it.",
+      "The company cafeteria menu has become more varied, and I look forward to lunch every day.",
+      "I'm currently studying to acquire the necessary skills for next month's new project."
+    ],
+    "labels": [0, 1, 0, 0, 0]
+  },
+  {
+    "reasoning": "Asked about colleague information, and the fourth sentence mentions Tanaka-san's birthday. Others are workplace talk.",
+    "query": "Do you know any information about colleagues?",
+    "contexts": [
+      "The office renovation has brightened the atmosphere, and I felt the effect of houseplants is significant.",
+      "With more remote work, commuting time has decreased, and I can use that time effectively.",
+      "Now that we can make espresso with the new coffee maker, break times have become more enjoyable.",
+      "Tanaka-san's birthday is March 15th, so we're currently planning a surprise party.",
+      "Weekends are often busy with housework, but I try to make time by focusing on efficiency."
+    ],
+    "labels": [0, 0, 0, 1, 0]
+  },
+  {
+    "reasoning": "Asked about reading, and the first sentence shows they're reading a work by Haruki Murakami. Others are about reading habits.",
+    "query": "Please tell me about the book you're reading recently",
+    "contexts": [
+      "The 'Norwegian Wood' by Haruki Murakami I'm reading now has new discoveries every time I read it, and I think it's a profound work.",
+      "I've decided to read for 30 minutes before bed, and it serves as a good sleep inducer.",
+      "Going to the library twice a month has become a habit, and I look forward to encountering new books.",
+      "E-books are convenient, but I still prefer the feel of paper books and use both.",
+      "I have plans for a hot spring trip with friends next week and am looking forward to refreshing myself."
+    ],
+    "labels": [1, 0, 0, 0, 0]
+  },
+  {
+    "reasoning": "Asked about travel plans, and the fifth sentence mentions a trip to Kyoto for autumn leaves. Others are travel preparation talk.",
+    "query": "Where is your next travel destination?",
+    "contexts": [
+      "The trick is to start travel preparations early so you don't panic at the last minute.",
+      "I checked my passport's expiration date and was relieved to find it still has three years left.",
+      "The new suitcase has excellent storage capacity and makes organizing luggage easier.",
+      "I always make sure to get travel insurance to prepare for emergencies, so I can enjoy the trip with peace of mind.",
+      "During the holidays, I plan to go to Kyoto to see the autumn leaves, and I've heard Kyoto is exceptionally beautiful at this time."
+    ],
+    "labels": [0, 0, 0, 0, 1]
+  },
+  {
+    "reasoning": "Asked about prescribed medication, and the third sentence specifically mentions Allegra. Others are health management talk.",
+    "query": "About medication prescribed by the doctor",
+    "contexts": [
+      "I've been feeling unwell lately and deeply realize the importance of health management.",
+      "I finished reading a book during the hospital waiting time and felt I made good use of the time.",
+      "I was prescribed Allegra for allergies and am hoping for its effectiveness.",
+      "I always make sure to confirm how to take medication with the pharmacist at the pharmacy, thinking safety comes first.",
+      "I've also started taking vitamin supplements and want to think about health management comprehensively."
+    ],
+    "labels": [0, 0, 1, 0, 0]
+  },
+  {
+    "reasoning": "Asked about movies, and the second sentence mentions watching 'Your Name.' Others are about movie theaters.",
+    "query": "Please share your thoughts on a recent movie",
+    "contexts": [
+      "The movie theater after a long time had a different impact on the big screen, and I felt that movie theaters are indeed special.",
+      "'Your Name.' that I watched yesterday was touching and I couldn't stop crying, it was a wonderful work.",
+      "Popcorn and cola are standard at movie theaters, and I think this combination is the best.",
+      "Although streaming services are abundant these days, I once again thought the movie theater experience is exceptional.",
+      "I'm looking forward to next month's new releases and am excited after watching the trailers."
+    ],
+    "labels": [0, 1, 0, 0, 0]
+  },
+  {
+    "reasoning": "Asked about restaurant reservation, and the fourth sentence mentions a 7:30 reservation. Others are about dining out.",
+    "query": "Please let me confirm the restaurant reservation time",
+    "contexts": [
+      "I'm looking forward to dining out after a long time, and even deciding where to go is part of the fun.",
+      "Recently, it's become convenient to make reservations easily through apps, and I think it's a convenient era.",
+      "I chose a restaurant with a nice atmosphere for my friend's birthday celebration and hope they'll be pleased.",
+      "The restaurant reservation is at 7:30, and I think it's a perfect time.",
+      "Looking at the menu, everything looks delicious, and I'm already looking forward to choosing."
+    ],
+    "labels": [0, 0, 0, 1, 0]
+  },
+  {
+    "reasoning": "Asked about delivery, and the first sentence clearly states the day after tomorrow morning. Others are online shopping talk.",
+    "query": "What's the delivery schedule for the ordered item?",
+    "contexts": [
+      "The ordered item is scheduled for delivery the morning of the day after tomorrow, so I've decided to wait at home.",
+      "Online shopping is convenient, but not being able to see the actual item is a drawback.",
+      "I was able to buy in bulk with the free shipping campaign, and I'm satisfied it was a good deal.",
+      "I'm also making good use of credit card points and want to shop wisely.",
+      "I properly recycle packaging materials, wanting to be environmentally conscious."
+    ],
+    "labels": [1, 0, 0, 0, 0]
+  },
+  {
+    "reasoning": "Asked about the car, and the fifth sentence mentions buying a navy blue car. Others are about car selection.",
+    "query": "Please tell me about the features of your new car",
+    "contexts": [
+      "I carefully selected a car, visiting multiple dealers to compare options.",
+      "I decided on a fuel-efficient hybrid car, thinking it's a choice that's kind to both the environment and my wallet.",
+      "After the test drive, I experienced the comfort and felt that long-distance driving would become easier.",
+      "I also enhanced the safety features, thinking safety first since I often have family members riding with me.",
+      "In the end, I purchased a calm navy blue car, thinking it's a nice color that won't get old."
+    ],
+    "labels": [0, 0, 0, 0, 1]
+  },
+  {
+    "reasoning": "Asked about concert venue, and the second sentence clearly states Tokyo Dome. Others are concert talk.",
+    "query": "Where is the concert venue?",
+    "contexts": [
+      "I'm really happy to get tickets for my favorite artist, feeling it's the day I've been waiting for.",
+      "The concert will be held at Tokyo Dome, and I'm looking forward to the large-scale production.",
+      "Going with friends, I expect it will be an even more enjoyable time.",
+      "I want to buy merchandise too, so I plan to arrive at the venue early.",
+      "We plan to have a meal nearby after the show, thinking we can enjoy the whole day."
+    ],
+    "labels": [0, 1, 0, 0, 0]
+  },
+  {
+    "reasoning": "Asked about new office location, and the third sentence mentions 5 minutes walk from the station. Others are relocation talk.",
+    "query": "About access to the new office",
+    "contexts": [
+      "The company relocation has changed my commute route, and I want to get used to the new environment quickly.",
+      "The new office is spacious with good facilities, and I felt it looks like a comfortable working environment.",
+      "The location is convenient, just a 5-minute walk from the station, which will make rainy days easier.",
+      "There are many convenience stores and cafes nearby, and I'm happy that lunch options have increased.",
+      "We're leaving the moving work to professionals, and I feel relieved that the relocation should go smoothly."
+    ],
+    "labels": [0, 0, 1, 0, 0]
+  },
+  {
+    "reasoning": "Asked about birthday cake, and the fourth sentence clearly states strawberry shortcake. Others are party talk.",
+    "query": "What did you prepare for the birthday celebration?",
+    "contexts": [
+      "I was busy from morning preparing for the birthday party, but it was an enjoyable busyness.",
+      "Friends helped with decorations, and I'm grateful for everyone's cooperation.",
+      "The surprise preparations are all set, and I expect they'll surely be pleased.",
+      "I ordered a strawberry shortcake for the cake, thinking it's a classic but fail-safe choice.",
+      "We took lots of photos and made good memories, feeling it was a wonderful day."
+    ],
+    "labels": [0, 0, 0, 1, 0]
+  },
+  {
+    "reasoning": "Asked about regular lessons, and the first sentence mentions Wednesday evening piano lessons. Others are music talk.",
+    "query": "Please tell me about your regular lessons",
+    "contexts": [
+      "Piano lessons are every Wednesday evening, which is a convenient time to attend after work.",
+      "The new piece is difficult but challenging, and I feel I'm gradually improving.",
+      "I practice for 30 minutes every day for the recital, realizing that consistency is important.",
+      "I've gotten faster at reading sheet music, and I'm happy to see the results of my efforts.",
+      "I've started listening to classical music too, feeling that my musical world is expanding."
+    ],
+    "labels": [1, 0, 0, 0, 0]
+  },
+  {
+    "reasoning": "Asked about garden plants, and the fifth sentence mentions planting sunflowers. Others are gardening talk.",
+    "query": "About plants you're growing in the garden",
+    "contexts": [
+      "Since starting gardening, the garden has brightened up, and I feel the power of plants is wonderful.",
+      "Starting from soil preparation and giving fertilizer regularly, I realize the basics are important.",
+      "I water twice a day, morning and evening, adjusting while watching the plants' condition.",
+      "I use insect repellent spray but try to choose natural methods as much as possible.",
+      "The sunflowers in the garden have grown tall, and I like the summery atmosphere."
+    ],
+    "labels": [0, 0, 0, 0, 1]
+  },
+  {
+    "reasoning": "Asked about sports club, and the second sentence clearly states 8,000 yen monthly fee. Others are exercise talk.",
+    "query": "Please tell me about your investment in health",
+    "contexts": [
+      "I decided to start exercising because I think health is the most valuable asset of all.",
+      "The nearby sports club has a monthly fee of 8,000 yen, which I think is reasonable considering the facilities.",
+      "There's a pool, gym, and yoga classes, so I can do various exercises without getting bored.",
+      "My goal is to go three times a week, and I want to continue within reasonable limits.",
+      "The sauna after exercise feels great, and I feel refreshed both physically and mentally."
+    ],
+    "labels": [0, 1, 0, 0, 0]
+  },
+  {
+    "reasoning": "Asked about a new friend, and the third sentence mentions being from Fukuoka. Others are social relationship talk.",
+    "query": "About someone you recently met",
+    "contexts": [
+      "I made a new friend at a hobby circle, and I felt it's easy to talk when we have common topics.",
+      "Conversations with people who share the same hobby are fun, and time passes in an instant.",
+      "That friend is from Fukuoka and their Hakata dialect is cute, making me think regional culture is interesting.",
+      "We promised to go to an exhibition together next time, and I feel I have more fun plans to look forward to.",
+      "I'm happy we became friends quickly and am grateful for this good encounter."
+    ],
+    "labels": [0, 0, 1, 0, 0]
+  },
+  {
+    "reasoning": "Asked about exam results, and the fourth sentence mentions passing. Others are study talk.",
+    "query": "How did the certification exam go?",
+    "contexts": [
+      "I continued studying for the certification exam for three months, and looking back, balancing it with work was tough.",
+      "I solved reference books and practice problems many times, realizing the effect of repetitive learning is significant.",
+      "I was nervous on the exam day but didn't give up until the end, thinking I gave it my all.",
+      "The result was a splendid pass, and I was truly happy that my efforts were rewarded.",
+      "I want to challenge an even higher level certification next and want to maintain my ambition."
+    ],
+    "labels": [0, 0, 0, 1, 0]
+  },
+  {
+    "reasoning": "Asked about souvenirs, and the first sentence mentions buying pickled plums. Others are travel talk.",
+    "query": "What did you purchase during your trip?",
+    "contexts": [
+      "I bought locally famous pickled plums as travel souvenirs, thinking they'll last long and be appreciated.",
+      "The tourist spots were crowded, but that's also part of the charm of travel and it was lively and good.",
+      "The hotel breakfast buffet was luxurious, and I was satisfied to enjoy local ingredients.",
+      "Being able to travel freely by rental car was good, and I felt my range of activities expanded.",
+      "I want to stay longer next time, reflecting that it was a rushed trip."
+    ],
+    "labels": [1, 0, 0, 0, 0]
+  },
+  {
+    "reasoning": "Asked about pet's age, and the fifth sentence clearly states 5 years old. Others are dog care talk.",
+    "query": "Please tell me about your dog",
+    "contexts": [
+      "Since I started keeping a dog, daily walks have become routine, and I feel it's a healthy habit.",
+      "I choose healthy dog food, thinking that diet is the foundation of health.",
+      "I have professionals do grooming once a month, thinking it becomes unrecognizably cute.",
+      "The dog learned basic commands at obedience school, and I feel blessed to have such a smart dog.",
+      "My dog turned 5 years old this year and is still full of energy, which makes me happy."
+    ],
+    "labels": [0, 0, 0, 0, 1]
+  },
+  {
+    "reasoning": "Asked about high school days, and the second sentence mentions being in the basketball club. Others are memories.",
+    "query": "About club activities during student days",
+    "contexts": [
+      "We got excited talking about high school memories, feeling that nostalgic stories are endless.",
+      "I was sweating it out in the basketball club and look back on learning teamwork.",
+      "The time with friends after club activities was fun, and I reminisce about it being a page of youth.",
+      "Cultural festivals and sports days are also good memories, nostalgic for the days we all cooperated.",
+      "I still meet with classmates regularly and feel happy about our unchanging friendship."
+    ],
+    "labels": [0, 1, 0, 0, 0]
+  },
+  {
+    "reasoning": "Asked about dinner, and the third sentence mentions simmered sea bream. Others are shopping talk.",
+    "query": "What's today's dinner menu?",
+    "contexts": [
+      "I went shopping on the supermarket's sale day and was satisfied with the good deals.",
+      "There were lots of fresh vegetables and I was unsure which to choose, thinking seasonal ones are best.",
+      "Tonight I plan to make simmered dish with fresh sea bream, thinking Japanese food is gentle on the body.",
+      "I also bought pudding for dessert, thinking it's nice to have something to look forward to after meals.",
+      "I forgot my eco bag and bought a new one, reflecting that I want to remember next time."
+    ],
+    "labels": [0, 0, 1, 0, 0]
+  },
+  {
+    "reasoning": "Asked about hobbies, and the fourth sentence mentions starting photography. Others are leisure talk.",
+    "query": "What new activity have you started recently?",
+    "contexts": [
+      "I'm reconsidering how to spend holidays and want to make them more fulfilling.",
+      "I feel going out is better for a change of pace than lounging at home.",
+      "I've started participating in various activities when invited by friends, and I think my world has expanded.",
+      "The photography I recently started is more fun than expected, and I feel a new world has opened up.",
+      "I plan to buy a new camera lens next month and want to tackle it seriously."
+    ],
+    "labels": [0, 0, 0, 1, 0]
+  },
+  {
+    "reasoning": "Asked about dentist appointment, and the first sentence clearly states April 10th at 10 AM. Others are dental health talk.",
+    "query": "Please tell me about your dental checkup appointment",
+    "contexts": [
+      "The dentist appointment is at 10 AM on April 10th, and I value regular checkups.",
+      "I never miss checkups every six months, thinking prevention is most important.",
+      "I was taught how to brush teeth too, and realized proper brushing makes a difference.",
+      "I now use floss daily too, recognizing that cleaning between teeth is also important.",
+      "Dental health is connected to overall health, and I want to take care of it."
+    ],
+    "labels": [1, 0, 0, 0, 0]
+  },
+  {
+    "reasoning": "Asked about travel expenses, and the fifth sentence states 50,000 yen per person. Others are travel planning talk.",
+    "query": "Please tell me the travel expenses",
+    "contexts": [
+      "Travel planning is fun but budget management is also important, and I want to think about balance.",
+      "I booked the hotel 20% cheaper with early booking discount, feeling that early planning paid off.",
+      "Transportation costs were higher than expected, but I judged it reasonable considering comfort.",
+      "Including souvenir expenses, I went slightly over budget, but I think they were good purchases.",
+      "In the end, travel expenses settled at 50,000 yen per person, and I'm satisfied with the fulfilling content."
+    ],
+    "labels": [0, 0, 0, 0, 1]
+  }
+]
