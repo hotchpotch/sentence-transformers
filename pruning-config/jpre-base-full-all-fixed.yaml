@@ -14,10 +14,6 @@ data_args:
       teacher_column: "teacher_scores.japanese-reranker-base-v2"
     -
       dataset_name: "hotchpotch/wip-japanese-context-relevance"
-      subset: "auto-wiki-qa-nemotron"
-      teacher_column: "teacher_scores.japanese-reranker-base-v2"
-    -
-      dataset_name: "hotchpotch/wip-japanese-context-relevance"
       subset: "jaquad"
       teacher_column: "teacher_scores.japanese-reranker-base-v2"
     -

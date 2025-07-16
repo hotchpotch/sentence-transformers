@@ -6,11 +6,7 @@ data_args:
   datasets:
     -
       dataset_name: "hotchpotch/wip-msmarco-context-relevance"
-      subset: "msmarco-ja-full"
-      teacher_column: "teacher_scores.japanese-reranker-base-v2"
-    -
-      dataset_name: "hotchpotch/wip-japanese-context-relevance"
-      subset: "auto-wiki-qa-nemotron"
+      subset: "msmarco-ja-small"
       teacher_column: "teacher_scores.japanese-reranker-base-v2"
     -
       dataset_name: "hotchpotch/wip-japanese-context-relevance"
