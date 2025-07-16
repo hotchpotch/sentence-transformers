@@ -97,7 +97,8 @@ def analyze_pruning_simple(json_file, model_path, threshold=0.5, num_samples=10)
             
             # Get pruning probabilities
             pruning_logits = outputs["pruning_logits"]
-            pruning_probs = torch.sigmoid(pruning_logits).cpu().numpy()
+            # Apply softmax for proper probability distribution
+            pruning_probs = torch.softmax(pruning_logits, dim=-1).cpu().numpy()
             
             # If binary classification, take the "keep" probability (index 1)
             if pruning_probs.ndim == 3 and pruning_probs.shape[-1] == 2:
