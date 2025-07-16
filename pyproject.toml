@@ -117,3 +117,7 @@ markers = [
 dev = [
     "pytest>=8.4.1",
 ]
+
+flash-attn = [
+    "flash-attn>=2.7.4.post1",
+]
