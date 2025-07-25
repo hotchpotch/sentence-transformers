@@ -221,9 +221,9 @@ class PruningTrainingArguments(TrainingArguments):
 def filter_pruning_dataset(dataset, max_items, num_proc=11):
     """
     Filter dataset for pruning training:
-    1. Remove rows where context_spans_relevance contains all zeros
-    2. Limit each row to first max_items items
-    3. Remove rows with less than max_items items
+    1. Remove items within each row where context_spans_relevance is all zeros
+    2. Limit each row to first max_items non-zero items
+    3. Remove rows with less than max_items items after filtering
     
     Args:
         dataset: HuggingFace dataset to filter
@@ -233,64 +233,66 @@ def filter_pruning_dataset(dataset, max_items, num_proc=11):
     Returns:
         Filtered dataset
     """
-    # Get logger for this module
-    module_logger = logging.getLogger(__name__)
+    logger = logging.getLogger(__name__)
     initial_size = len(dataset)
     
-    # Step 1: Remove rows where context_spans_relevance contains all zeros
-    def has_non_zero_relevance(example):
+    # Step 1 & 2: Remove zero-relevance items and limit to max_items
+    def filter_and_limit_items(example):
         relevance = example.get('context_spans_relevance', [])
         if not relevance:
-            return False
-        # Check if at least one item has non-zero relevance
-        for item in relevance:
+            return example
+        
+        # Get the original length
+        original_length = len(relevance)
+        
+        # Find indices of non-zero relevance items
+        non_zero_indices = []
+        for i, item in enumerate(relevance):
             if isinstance(item, list):
+                # Check if at least one element in the sublist is non-zero
                 if any(r != 0 for r in item):
-                    return True
+                    non_zero_indices.append(i)
             else:
                 if item != 0:
-                    return True
-        return False
-    
-    module_logger.info(f"Filtering rows with all-zero relevance...")
-    dataset = dataset.filter(has_non_zero_relevance, num_proc=num_proc)
-    module_logger.info(f"After removing all-zero rows: {len(dataset)} rows ({len(dataset)/initial_size*100:.1f}% remaining)")
-    
-    # Step 2: Limit each row to first max_items items
-    def take_first_n_items(example):
-        # List fields that should be limited to max_items items
-        list_fields = ['labels', 'context_spans', 'texts', 'context_spans_relevance']
+                    non_zero_indices.append(i)
         
-        for field in list_fields:
-            if field in example and isinstance(example[field], list):
-                example[field] = example[field][:max_items]
+        # Take only the first max_items non-zero items
+        indices_to_keep = non_zero_indices[:max_items]
         
-        # Also handle positive/negative if they are lists with more than max_items items
-        for field in ['positive', 'negative']:
-            if field in example and isinstance(example[field], list) and len(example[field]) > max_items:
-                example[field] = example[field][:max_items]
+        # Find all fields that are lists with the same length as context_spans_relevance
+        fields_to_filter = []
+        for field, value in example.items():
+            if isinstance(value, list) and len(value) == original_length:
+                fields_to_filter.append(field)
         
-        # Handle teacher scores - limit to first max_items items
-        for field in example.keys():
-            if 'teacher_scores' in field and isinstance(example[field], list):
-                example[field] = example[field][:max_items]
+        # Log fields to be filtered (only on first example to avoid spam)
+        if getattr(filter_and_limit_items, '_first_run', True):
+            filter_and_limit_items._first_run = False
+            logger.debug(f"Fields to filter (same length as context_spans_relevance): {fields_to_filter}")
+        
+        # Filter all identified fields by the indices to keep
+        for field in fields_to_filter:
+            example[field] = [example[field][i] for i in indices_to_keep if i < len(example[field])]
         
         return example
     
-    module_logger.info(f"Limiting each row to first {max_items} items...")
-    dataset = dataset.map(take_first_n_items, num_proc=num_proc)
+    # Set flag for first run logging
+    filter_and_limit_items._first_run = True
+    
+    logger.info(f"Filtering zero-relevance items and limiting to {max_items} items per row...")
+    dataset = dataset.map(filter_and_limit_items, num_proc=num_proc)
     
     # Step 3: Remove rows with less than max_items items
     def has_at_least_n_items(example):
         relevance = example.get('context_spans_relevance', [])
         return len(relevance) >= max_items
     
-    module_logger.info(f"Removing rows with less than {max_items} items...")
+    logger.info(f"Removing rows with less than {max_items} items...")
     dataset = dataset.filter(has_at_least_n_items, num_proc=num_proc)
     
     final_size = len(dataset)
-    module_logger.info(f"Final dataset size: {final_size} rows ({final_size/initial_size*100:.1f}% of original)")
-    module_logger.info(f"Removed {initial_size - final_size} rows total")
+    logger.info(f"Final dataset size: {final_size} rows ({final_size/initial_size*100:.1f}% of original)")
+    logger.info(f"Removed {initial_size - final_size} rows total")
     
     return dataset
 
@@ -314,10 +316,16 @@ def prepare_dataset(
         logger.info(f"Loading {len(datasets_to_load)} datasets for concatenation")
     else:
         # Convert single dataset to list format
+        # Use teacher_column from data_args if specified, otherwise default to teacher_model_name
+        if hasattr(data_args, 'teacher_column') and data_args.teacher_column:
+            teacher_column = data_args.teacher_column
+        else:
+            teacher_column = f'teacher_scores.{teacher_model_name}'
+        
         datasets_to_load = [{
             'dataset_name': data_args.dataset_name,
             'subset': data_args.subset,
-            'teacher_column': f'teacher_scores.{teacher_model_name}'
+            'teacher_column': teacher_column
         }]
         logger.info(f"Loading dataset: {data_args.dataset_name}:{data_args.subset}")
     
@@ -338,7 +346,7 @@ def prepare_dataset(
         
         # Apply filtering if specified
         if data_args.filter_zero_relevance_max_items is not None:
-            logger.info(f"Applying filtering to {dataset_name}:{subset} train set (max_items={data_args.filter_zero_relevance_max_items})")
+            logger.info(f"Applying filtering to {dataset_name}:{subset} train set (removing zero-relevance items, max_items={data_args.filter_zero_relevance_max_items})")
             train_ds = filter_pruning_dataset(train_ds, data_args.filter_zero_relevance_max_items, num_proc=11)
             filtered_train_size = len(train_ds)
             logger.info(f"  → {dataset_name}:{subset} train: {original_train_size:,} → {filtered_train_size:,} samples ({filtered_train_size/original_train_size*100:.1f}% retained)")
@@ -366,7 +374,7 @@ def prepare_dataset(
             
             # Apply filtering if specified
             if data_args.filter_zero_relevance_max_items is not None:
-                logger.info(f"Applying filtering to {dataset_name}:{subset} {eval_split} set (max_items={data_args.filter_zero_relevance_max_items})")
+                logger.info(f"Applying filtering to {dataset_name}:{subset} {eval_split} set (removing zero-relevance items, max_items={data_args.filter_zero_relevance_max_items})")
                 eval_ds = filter_pruning_dataset(eval_ds, data_args.filter_zero_relevance_max_items, num_proc=11)
                 filtered_eval_size = len(eval_ds)
                 logger.info(f"  → {dataset_name}:{subset} {eval_split}: {original_eval_size:,} → {filtered_eval_size:,} samples ({filtered_eval_size/original_eval_size*100:.1f}% retained)")
@@ -967,11 +975,8 @@ def main():
     )
     
     # Create data collator with teacher score column and correct column names
-    if data_args.datasets:
-        # When using multiple datasets, we've renamed to 'teacher_score'
-        teacher_score_column = "teacher_score"
-    else:
-        teacher_score_column = f"teacher_scores.{teacher_model_name}"
+    # Always use 'teacher_score' since we rename it in prepare_dataset
+    teacher_score_column = "teacher_score"
     logger.info(f"Using teacher score column: {teacher_score_column}")
     data_collator = PruningDataCollator(
         tokenizer=model.tokenizer,
