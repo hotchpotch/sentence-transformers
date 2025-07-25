@@ -133,96 +133,78 @@ def evaluate_single_example(model, query: str, contexts: List[str], thresholds: 
         else:
             pruning_probs = pruning_probs[0]  # Already (seq_len,)
     
-    # ===== 9. トークンIDをテキストトークンに変換（境界検出用） =====
-    # Convert tokens to text to find context boundaries
-    tokens = model.tokenizer.convert_ids_to_tokens(encoding['input_ids'][0])
+    # ===== 9. 各コンテキストの境界位置を検出: contextsの区切りに基づいて計算 =====
+    # Find context boundaries based on the given contexts
+    context_boundaries = []
     
-    # ===== 10. SEPトークンの位置を検索 =====
-    # Find SEP token position
-    sep_positions = []
-    for i, token in enumerate(tokens):
-        if token == model.tokenizer.sep_token:
-            sep_positions.append(i)
+    # 各コンテキストの累積テキストをトークナイズして境界を特定
+    # 例: query + sep + context1 のトークン数、query + sep + context1 + context2 のトークン数...
+    prefix = query + model.tokenizer.sep_token
     
-    # SEPトークンが見つからない場合はエラーを返す
-    if not sep_positions:
-        return {
-            'query': query,
-            'contexts': contexts,
-            'error': 'Could not find SEP token',
-            'predictions': {}
-        }
-    
-    # ===== 11. コンテキスト開始位置の特定: 最初のSEPトークンの後 =====
-    # Context starts after the first SEP token
-    context_start = sep_positions[0] + 1
-    
-    # ===== 12. 各コンテキストの境界位置を検出 =====
-    # Find context boundaries by looking for sentence endings
-    context_boundaries = [context_start]
-    current_text = ""
-    
-    # トークンを順番に処理して文の区切り（句点）を探す
-    for i in range(context_start, len(tokens)):
-        # 特殊トークンはスキップ
-        if tokens[i] in ['<s>', '</s>', '<pad>', model.tokenizer.pad_token]:
-            continue
-            
-        # トークンをテキストに変換して累積
-        token_text = model.tokenizer.convert_tokens_to_string([tokens[i]])
-        current_text += token_text
+    for i in range(len(processed_contexts)):
+        # i番目までのコンテキストを連結したテキストを作成
+        cumulative_text = prefix + ''.join(processed_contexts[:i+1])
         
-        # 句点（。または.）で終わっている場合、コンテキストの境界とする
-        # Check if we've reached the end of a context
-        if current_text.endswith('。') or current_text.endswith('.'):
-            context_boundaries.append(i + 1)
-            current_text = ""
+        # トークナイズして長さを取得
+        cumulative_encoding = model.tokenizer(
+            cumulative_text,
+            padding=False,
+            truncation=True,
+            max_length=model.max_length,
+            return_tensors='pt'
+        )
+        
+        # このコンテキストの終了位置（次のコンテキストの開始位置）
+        context_boundaries.append(cumulative_encoding['input_ids'].shape[1])
     
-    # 境界の数が多すぎる場合は調整
-    # Ensure we have the right number of boundaries
-    if len(context_boundaries) > len(processed_contexts) + 1:
-        context_boundaries = context_boundaries[:len(processed_contexts) + 1]
+    # 最初のコンテキストの開始位置を計算（query + sep のトークン数）
+    query_sep_encoding = model.tokenizer(
+        prefix,
+        padding=False,
+        truncation=False,
+        return_tensors='pt'
+    )
+    context_start = query_sep_encoding['input_ids'].shape[1]
     
-    # ===== 13. 各閾値に対して予測を実行 =====
+    # context_boundaries を [開始位置, 終了位置] のペアに変換
+    # 例: contexts が3つの場合 -> [(start, end1), (end1, end2), (end2, end3)]
+    context_ranges = []
+    prev_pos = context_start
+    for end_pos in context_boundaries:
+        context_ranges.append((prev_pos, end_pos))
+        prev_pos = end_pos
+    
+    # ===== 10. 各閾値に対して予測を実行 =====
     # Process each threshold
     predictions_by_threshold = {}
     
     for threshold in thresholds:
         predictions = []
         
-        # ===== 14. 各コンテキストに対して保持/削除を判定 =====
+        # ===== 11. 各コンテキストに対して保持/削除を判定 =====
         # Calculate keep/delete for each context
-        for i, context in enumerate(processed_contexts):
-            if i < len(context_boundaries) - 1:
-                # コンテキストの開始・終了位置を取得
-                start_pos = context_boundaries[i]
-                end_pos = context_boundaries[i + 1]
-                
-                if use_majority:
-                    # ===== 15a. 多数決方式: トークンの過半数が閾値以上なら保持 =====
-                    # Original majority voting approach
-                    context_probs = pruning_probs[start_pos:end_pos]
-                    kept_tokens = np.sum(context_probs >= threshold)
-                    total_tokens = len(context_probs)
-                    is_kept = kept_tokens >= (total_tokens / 2)
-                else:
-                    # ===== 15b. Provence方式: トークンの平均確率で判定 =====
-                    # Provence-style averaging approach
-                    is_kept = sentence_rounding_provence(
-                        pruning_probs, start_pos, end_pos, threshold
-                    )
-                
-                # 保持なら1、削除なら0
-                predictions.append(1 if is_kept else 0)
+        for i, (start_pos, end_pos) in enumerate(context_ranges):
+            if use_majority:
+                # ===== 12a. 多数決方式: トークンの過半数が閾値以上なら保持 =====
+                # Original majority voting approach
+                context_probs = pruning_probs[start_pos:end_pos]
+                kept_tokens = np.sum(context_probs >= threshold)
+                total_tokens = len(context_probs)
+                is_kept = kept_tokens >= (total_tokens / 2)
             else:
-                # 境界が特定できない場合はデフォルトで保持
-                # If we couldn't determine boundaries, keep the context
-                predictions.append(1)
+                # ===== 12b. Provence方式: トークンの平均確率で判定 =====
+                # Provence-style averaging approach
+                is_kept = sentence_rounding_provence(
+                    pruning_probs, start_pos, end_pos, threshold
+                )
+            
+            # 保持なら1、削除なら0
+            predictions.append(1 if is_kept else 0)
         
         # 閾値ごとの予測結果を保存
         predictions_by_threshold[threshold] = predictions
     
-    # ===== 16. 結果を返す =====
+    # ===== 13. 結果を返す =====
     return {
         'query': query,
         'contexts': contexts,

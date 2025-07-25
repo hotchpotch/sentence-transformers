@@ -146,6 +146,10 @@ class DataArguments:
         default=None,
         metadata={"help": "The number of processes to use for the preprocessing."}
     )
+    filter_zero_relevance_max_items: Optional[int] = field(
+        default=None,
+        metadata={"help": "If set, filters rows with all-zero relevance and limits items per row to this number. Default: None (no filtering)"}
+    )
 
 
 @dataclass
@@ -214,153 +218,245 @@ class PruningTrainingArguments(TrainingArguments):
     )
 
 
+def filter_pruning_dataset(dataset, max_items, num_proc=11):
+    """
+    Filter dataset for pruning training:
+    1. Remove rows where context_spans_relevance contains all zeros
+    2. Limit each row to first max_items items
+    3. Remove rows with less than max_items items
+    
+    Args:
+        dataset: HuggingFace dataset to filter
+        max_items: Maximum number of items per row
+        num_proc: Number of processes for parallel processing
+        
+    Returns:
+        Filtered dataset
+    """
+    # Get logger for this module
+    module_logger = logging.getLogger(__name__)
+    initial_size = len(dataset)
+    
+    # Step 1: Remove rows where context_spans_relevance contains all zeros
+    def has_non_zero_relevance(example):
+        relevance = example.get('context_spans_relevance', [])
+        if not relevance:
+            return False
+        # Check if at least one item has non-zero relevance
+        for item in relevance:
+            if isinstance(item, list):
+                if any(r != 0 for r in item):
+                    return True
+            else:
+                if item != 0:
+                    return True
+        return False
+    
+    module_logger.info(f"Filtering rows with all-zero relevance...")
+    dataset = dataset.filter(has_non_zero_relevance, num_proc=num_proc)
+    module_logger.info(f"After removing all-zero rows: {len(dataset)} rows ({len(dataset)/initial_size*100:.1f}% remaining)")
+    
+    # Step 2: Limit each row to first max_items items
+    def take_first_n_items(example):
+        # List fields that should be limited to max_items items
+        list_fields = ['labels', 'context_spans', 'texts', 'context_spans_relevance']
+        
+        for field in list_fields:
+            if field in example and isinstance(example[field], list):
+                example[field] = example[field][:max_items]
+        
+        # Also handle positive/negative if they are lists with more than max_items items
+        for field in ['positive', 'negative']:
+            if field in example and isinstance(example[field], list) and len(example[field]) > max_items:
+                example[field] = example[field][:max_items]
+        
+        # Handle teacher scores - limit to first max_items items
+        for field in example.keys():
+            if 'teacher_scores' in field and isinstance(example[field], list):
+                example[field] = example[field][:max_items]
+        
+        return example
+    
+    module_logger.info(f"Limiting each row to first {max_items} items...")
+    dataset = dataset.map(take_first_n_items, num_proc=num_proc)
+    
+    # Step 3: Remove rows with less than max_items items
+    def has_at_least_n_items(example):
+        relevance = example.get('context_spans_relevance', [])
+        return len(relevance) >= max_items
+    
+    module_logger.info(f"Removing rows with less than {max_items} items...")
+    dataset = dataset.filter(has_at_least_n_items, num_proc=num_proc)
+    
+    final_size = len(dataset)
+    module_logger.info(f"Final dataset size: {final_size} rows ({final_size/initial_size*100:.1f}% of original)")
+    module_logger.info(f"Removed {initial_size - final_size} rows total")
+    
+    return dataset
+
+
 def prepare_dataset(
     data_args: DataArguments,
     teacher_model_name: str,
     seed: int = 42
 ) -> Tuple[Any, Any]:
     """
-    Load dataset - let PruningDataCollator handle the processing.
+    Load dataset with filtering - let PruningDataCollator handle the processing.
     
     Args:
         data_args: Data arguments containing dataset info
-        teacher_model_name: Name of the teacher model for score column (unused, passed to DataCollator)
+        teacher_model_name: Name of the teacher model for score column
         seed: Random seed for splitting
     """
-    # Check if we have multiple datasets
+    # Convert single dataset to datasets list format for unified processing
     if data_args.datasets:
-        logger.info(f"Loading {len(data_args.datasets)} datasets for concatenation")
-        train_datasets = []
-        eval_datasets = []
+        datasets_to_load = data_args.datasets
+        logger.info(f"Loading {len(datasets_to_load)} datasets for concatenation")
+    else:
+        # Convert single dataset to list format
+        datasets_to_load = [{
+            'dataset_name': data_args.dataset_name,
+            'subset': data_args.subset,
+            'teacher_column': f'teacher_scores.{teacher_model_name}'
+        }]
+        logger.info(f"Loading dataset: {data_args.dataset_name}:{data_args.subset}")
+    
+    train_datasets = []
+    eval_datasets = []
+    
+    # Process each dataset
+    for dataset_config in datasets_to_load:
+        dataset_name = dataset_config.get('dataset_name')
+        subset = dataset_config.get('subset')
+        teacher_column = dataset_config.get('teacher_column', f'teacher_scores.{teacher_model_name}')
         
-        for dataset_config in data_args.datasets:
-            dataset_name = dataset_config.get('dataset_name')
-            subset = dataset_config.get('subset')
-            teacher_column = dataset_config.get('teacher_column', f'teacher_scores.{teacher_model_name}')
-            
-            logger.info(f"Loading dataset: {dataset_name}:{subset}")
-            dataset = load_dataset(dataset_name, subset)
-            
-            # Process train dataset
-            train_ds = dataset['train']
-            
-            # Rename teacher column to unified name
-            if teacher_column != 'teacher_score' and teacher_column in train_ds.column_names:
-                logger.info(f"Renaming {teacher_column} to teacher_score")
-                train_ds = train_ds.rename_column(teacher_column, 'teacher_score')
-            
-            train_datasets.append(train_ds)
-            
-            # Process eval dataset if exists
-            if 'validation' in dataset:
-                eval_ds = dataset['validation']
-                if teacher_column != 'teacher_score' and teacher_column in eval_ds.column_names:
-                    eval_ds = eval_ds.rename_column(teacher_column, 'teacher_score')
-                eval_datasets.append(eval_ds)
-            elif 'test' in dataset:
-                eval_ds = dataset['test']
-                if teacher_column != 'teacher_score' and teacher_column in eval_ds.column_names:
-                    eval_ds = eval_ds.rename_column(teacher_column, 'teacher_score')
-                eval_datasets.append(eval_ds)
+        dataset = load_dataset(dataset_name, subset)
         
-        # Get common columns for concatenation
-        if train_datasets:
-            # Find common columns across all datasets
-            common_columns = set(train_datasets[0].column_names)
-            for ds in train_datasets[1:]:
-                common_columns = common_columns.intersection(set(ds.column_names))
+        # Process train dataset
+        train_ds = dataset['train']
+        original_train_size = len(train_ds)
+        
+        # Apply filtering if specified
+        if data_args.filter_zero_relevance_max_items is not None:
+            logger.info(f"Applying filtering to {dataset_name}:{subset} train set (max_items={data_args.filter_zero_relevance_max_items})")
+            train_ds = filter_pruning_dataset(train_ds, data_args.filter_zero_relevance_max_items, num_proc=11)
+            filtered_train_size = len(train_ds)
+            logger.info(f"  → {dataset_name}:{subset} train: {original_train_size:,} → {filtered_train_size:,} samples ({filtered_train_size/original_train_size*100:.1f}% retained)")
+        
+        # Rename teacher column to unified name
+        if teacher_column != 'teacher_score' and teacher_column in train_ds.column_names:
+            logger.info(f"Renaming {teacher_column} to teacher_score")
+            train_ds = train_ds.rename_column(teacher_column, 'teacher_score')
+        
+        train_datasets.append(train_ds)
+        
+        # Process eval dataset - check multiple possible splits
+        eval_split = None
+        if data_args.validation_split_name in dataset:
+            eval_split = data_args.validation_split_name
+        elif 'validation' in dataset:
+            eval_split = 'validation'
+        elif 'test' in dataset:
+            eval_split = 'test'
+        
+        if eval_split:
+            logger.info(f"Using existing {eval_split} set for {dataset_name}:{subset}")
+            eval_ds = dataset[eval_split]
+            original_eval_size = len(eval_ds)
             
-            # Ensure required columns are present
-            required_columns = {'query', 'positive', 'negative', 'context_spans', 'context_spans_relevance', 'teacher_score'}
+            # Apply filtering if specified
+            if data_args.filter_zero_relevance_max_items is not None:
+                logger.info(f"Applying filtering to {dataset_name}:{subset} {eval_split} set (max_items={data_args.filter_zero_relevance_max_items})")
+                eval_ds = filter_pruning_dataset(eval_ds, data_args.filter_zero_relevance_max_items, num_proc=11)
+                filtered_eval_size = len(eval_ds)
+                logger.info(f"  → {dataset_name}:{subset} {eval_split}: {original_eval_size:,} → {filtered_eval_size:,} samples ({filtered_eval_size/original_eval_size*100:.1f}% retained)")
             
-            # Filter to common columns that actually exist
-            existing_columns = []
-            for col in common_columns:
-                if all(col in ds.column_names for ds in train_datasets):
-                    existing_columns.append(col)
+            if teacher_column != 'teacher_score' and teacher_column in eval_ds.column_names:
+                eval_ds = eval_ds.rename_column(teacher_column, 'teacher_score')
             
-            # Make sure we have the essential columns
-            essential_columns = ['query', 'positive', 'negative', 'teacher_score']
-            for col in essential_columns:
-                if col not in existing_columns and all(col in ds.column_names for ds in train_datasets):
-                    existing_columns.append(col)
-            
-            # Add context columns if they exist in all datasets
-            for col in ['context_spans', 'context_spans_relevance']:
-                if col not in existing_columns and all(col in ds.column_names for ds in train_datasets):
-                    existing_columns.append(col)
-            
-            logger.info(f"Using columns: {sorted(existing_columns)}")
-            train_datasets = [ds.select_columns(existing_columns) for ds in train_datasets]
-            
-            # Concatenate datasets
-            train_dataset = concatenate_datasets(train_datasets)
-            logger.info(f"Concatenated train dataset size: {len(train_dataset)}")
-        else:
-            train_dataset = None
-            
-        # Handle eval datasets
+            eval_datasets.append(eval_ds)
+    
+    # Combine datasets
+    if len(train_datasets) > 1:
+        # Multiple datasets - need to find common columns
+        common_columns = set(train_datasets[0].column_names)
+        for ds in train_datasets[1:]:
+            common_columns = common_columns.intersection(set(ds.column_names))
+        
+        # Prioritize essential columns
+        essential_columns = ['query', 'positive', 'negative', 'teacher_score']
+        context_columns = ['context_spans', 'context_spans_relevance']
+        
+        # Build column list with priority
+        existing_columns = []
+        
+        # Add essential columns first
+        for col in essential_columns:
+            if col in common_columns:
+                existing_columns.append(col)
+        
+        # Add context columns if available
+        for col in context_columns:
+            if col in common_columns:
+                existing_columns.append(col)
+        
+        # Add remaining common columns
+        for col in sorted(common_columns):
+            if col not in existing_columns:
+                existing_columns.append(col)
+        
+        logger.info(f"Using columns: {existing_columns}")
+        
+        # Select columns and concatenate
+        train_datasets = [ds.select_columns(existing_columns) for ds in train_datasets]
+        train_dataset = concatenate_datasets(train_datasets)
+        logger.info(f"Concatenated train dataset size: {len(train_dataset):,}")
+        
         if eval_datasets:
-            # Filter to same columns as train datasets
-            eval_datasets = [ds.select_columns(existing_columns) for ds in eval_datasets if all(col in ds.column_names for col in existing_columns)]
+            eval_datasets = [ds.select_columns(existing_columns) for ds in eval_datasets 
+                            if all(col in ds.column_names for col in existing_columns)]
             eval_dataset = concatenate_datasets(eval_datasets) if eval_datasets else None
+            if eval_dataset:
+                logger.info(f"Concatenated eval dataset size: {len(eval_dataset):,}")
         else:
             eval_dataset = None
-            
     else:
-        # Single dataset mode (backward compatibility)
-        logger.info(f"Loading dataset: {data_args.dataset_name}:{data_args.subset}")
-        dataset = load_dataset(data_args.dataset_name, data_args.subset)
-        
-        # Get raw train dataset (let DataCollator handle processing)
-        train_dataset = dataset['train']
-        eval_dataset = None
+        # Single dataset
+        train_dataset = train_datasets[0]
+        eval_dataset = eval_datasets[0] if eval_datasets else None
     
-    # Continue with validation set handling for single dataset mode
-    if not data_args.datasets:
-        # Try to use existing validation set first (prioritize validation over test)
-        if data_args.validation_split_name in dataset:
-            logger.info(f"Using existing validation set: '{data_args.validation_split_name}'")
-            eval_dataset = dataset[data_args.validation_split_name]
-        elif 'validation' in dataset:
-            logger.info("Using existing validation set: 'validation'")
-            eval_dataset = dataset['validation']
-    
-    # If no validation set found or split is explicitly specified, create split
-    if not data_args.datasets and (eval_dataset is None or data_args.validation_split is not None or data_args.validation_split_samples is not None):
+    # Handle validation split if no eval dataset exists
+    if eval_dataset is None and (data_args.validation_split is not None or data_args.validation_split_samples is not None):
         if data_args.validation_split_samples is not None:
             # Use absolute number of samples
             if data_args.validation_split_samples <= 0 or data_args.validation_split_samples >= len(train_dataset):
                 raise ValueError(f"validation_split_samples must be between 1 and {len(train_dataset)-1}")
             logger.info(f"Creating validation split with {data_args.validation_split_samples} samples")
             ratio = data_args.validation_split_samples / len(train_dataset)
-            split_dataset = train_dataset.train_test_split(test_size=ratio, seed=seed)
-            train_dataset = split_dataset['train']
-            eval_dataset = split_dataset['test']
-        elif data_args.validation_split is not None:
+        else:
             # Use ratio
             if not (0 < data_args.validation_split < 1):
                 raise ValueError("validation_split must be between 0 and 1")
             logger.info(f"Creating validation split with {data_args.validation_split:.0%} of training data")
-            split_dataset = train_dataset.train_test_split(test_size=data_args.validation_split, seed=seed)
-            train_dataset = split_dataset['train']
-            eval_dataset = split_dataset['test']
-        else:
-            # No validation set available and no split specified
-            logger.warning("No validation set found and no validation_split specified. Training without validation.")
-            eval_dataset = None
+            ratio = data_args.validation_split
+        
+        split_dataset = train_dataset.train_test_split(test_size=ratio, seed=seed)
+        train_dataset = split_dataset['train']
+        eval_dataset = split_dataset['test']
     
     # Apply sampling if specified
     if data_args.max_train_samples and len(train_dataset) > data_args.max_train_samples:
-        logger.info(f"Sampling {data_args.max_train_samples} training examples from {len(train_dataset)}")
+        logger.info(f"Sampling {data_args.max_train_samples} training examples from {len(train_dataset):,}")
         train_dataset = train_dataset.select(range(data_args.max_train_samples))
     
     if eval_dataset is not None and data_args.max_eval_samples and len(eval_dataset) > data_args.max_eval_samples:
-        logger.info(f"Sampling {data_args.max_eval_samples} evaluation examples from {len(eval_dataset)}")
+        logger.info(f"Sampling {data_args.max_eval_samples} evaluation examples from {len(eval_dataset):,}")
         eval_dataset = eval_dataset.select(range(data_args.max_eval_samples))
     
-    logger.info(f"Train samples: {len(train_dataset)}")
-    logger.info(f"Validation samples: {len(eval_dataset) if eval_dataset is not None else 0}")
+    # Log final sizes
+    logger.info(f"Final dataset sizes:")
+    logger.info(f"  Train samples: {len(train_dataset):,}")
+    logger.info(f"  Validation samples: {len(eval_dataset) if eval_dataset is not None else 0:,}")
     
     return train_dataset, eval_dataset
 
@@ -553,7 +649,8 @@ def parse_config_file(config_file: str) -> Tuple[ModelArguments, DataArguments, 
         validation_split_samples=data_config.get('validation_split_samples', None),
         validation_split_name=data_config.get('validation_split_name', 'validation'),
         preprocessing_num_workers=data_config.get('preprocessing_num_workers', None),
-        datasets=data_config.get('datasets', None)
+        datasets=data_config.get('datasets', None),
+        filter_zero_relevance_max_items=data_config.get('filter_zero_relevance_max_items', None)
     )
     
     # Extract training arguments
