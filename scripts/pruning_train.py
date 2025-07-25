@@ -245,19 +245,25 @@ def filter_pruning_dataset(dataset, max_items, num_proc=11):
         # Get the original length
         original_length = len(relevance)
         
-        # Find indices of non-zero relevance items
-        non_zero_indices = []
+        # Calculate average relevance for each item and collect non-zero items
+        items_with_avg = []
         for i, item in enumerate(relevance):
             if isinstance(item, list):
-                # Check if at least one element in the sublist is non-zero
+                # Calculate average relevance
+                avg_relevance = sum(item) / len(item) if len(item) > 0 else 0
+                # Only include items with at least one non-zero element
                 if any(r != 0 for r in item):
-                    non_zero_indices.append(i)
+                    items_with_avg.append((i, avg_relevance))
             else:
+                # Single value case
                 if item != 0:
-                    non_zero_indices.append(i)
+                    items_with_avg.append((i, item))
         
-        # Take only the first max_items non-zero items
-        indices_to_keep = non_zero_indices[:max_items]
+        # Sort by average relevance (descending) and take top max_items
+        items_with_avg.sort(key=lambda x: x[1], reverse=True)
+        indices_to_keep = [idx for idx, _ in items_with_avg[:max_items]]
+        # Keep the indices in their original order
+        indices_to_keep.sort()
         
         # Find all fields that are lists with the same length as context_spans_relevance
         fields_to_filter = []
