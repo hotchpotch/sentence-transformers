@@ -35,6 +35,9 @@ uv run python tmp/sample.py   # tmpディレクトリのサンプルコード実
 python scripts/pruning_train.py pruning-config/train-models/japanese-reranker-xsmall-v2.yaml
 python scripts/pruning_train.py --model_name_or_path hotchpotch/japanese-reranker-xsmall-v2 --subset msmarco-ja-minimal
 
+# データセットフィルタリング機能付き学習
+python scripts/pruning_train.py pruning-config/jpre-xs-msmarco-ja-small-i4.yaml  # filter_zero_relevance_max_items: 4
+
 # Pruning評価スクリプト
 python scripts/check_pruning.py -m output/model_path/final_model  # デフォルト日本語データ
 python scripts/check_pruning.py -j pruning-config/pruning_data_en.json -m output/model_path/final_model  # 英語データ
@@ -164,6 +167,10 @@ python scripts/check_pruning.py -j pruning-config/pruning_data_easy_ja.json -m o
   - trust_remote_code不要の自動登録機能
   - ベースモデルの直接利用（/ranking_modelサブディレクトリ）
   - 5つの読み込み方法すべてで動作確認
+- データセットフィルタリング機能実装（2025年1月）:
+  - 全ゼロrelevanceアイテムを自動除外
+  - relevance平均値によるスマートフィルタリング
+  - 柔軟な設定オプション（通常/逆順ソート、先頭保持）
 
 ### 仕様書管理
 

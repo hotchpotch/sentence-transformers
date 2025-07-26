@@ -11,6 +11,7 @@
 - 2025-01-09: 全6モデル学習完了（pruning-only×3、reranking+pruning×3）、包括的な性能比較実施
 - 2025-01-09: Transformers互換性実装完了、5つの読み込み方法対応
 - 2025-01-15: 評価スクリプトcheck_pruning.py追加、プルーニング効果の可視化機能実装
+- 2025-01-26: データセットフィルタリング機能実装（全ゼロ除外、relevance平均値ソート、先頭保持オプション）
 
 ## 概要
 
@@ -311,11 +312,53 @@ python scripts/check_pruning.py -j pruning-config/pruning_data_easy_ja.json -m o
 - **F2 = 0.8929**: 高い再現率重視のスコア
 - **精度**: 69.2%
 
+## データセットフィルタリング機能
+
+学習データの品質向上のため、高度なフィルタリング機能を実装：
+
+### フィルタリングパラメータ
+
+```yaml
+data_args:
+  # 基本設定
+  filter_zero_relevance_max_items: 4      # 各行の最大アイテム数（None: 無効）
+  filter_zero_relevance_max_items_reverse: false  # 逆順ソート（低relevance優先）
+  filter_keep_first_item: false           # 先頭アイテムを必ず保持
+```
+
+### フィルタリングロジック
+
+1. **全ゼロ除外**: `context_spans_relevance`が全て0のアイテムを自動除外
+2. **relevance平均値ソート**: 
+   - 通常: 高relevance順（高品質データ）
+   - 逆順: 低relevance順（hard negative重視）
+3. **先頭保持**: positive例の保護
+
+### 実装例
+
+```python
+def filter_pruning_dataset(dataset, max_items, num_proc=11, 
+                         reverse_sort=False, keep_first=False):
+    """
+    relevance平均値に基づくスマートフィルタリング
+    - 全ゼロアイテムを除外
+    - relevance平均値でソート（通常/逆順）
+    - 先頭アイテムの保護オプション
+    """
+```
+
+### 効果
+
+- **msmarco-ja-small**: 98,000 → 86,709 samples (88.5% retained)
+- 品質向上とデータ効率の両立
+- F2スコアの改善に寄与
+
 ## 今後の課題
 
 1. **ドキュメント作成**: API仕様、使用例、ベンチマーク結果
 2. **PR準備**: コミュニティへの貢献準備
 3. **追加評価**: より大規模なデータセットでの評価
+4. **フィルタリング最適化**: データセット特性に応じた自動パラメータ調整
 
 ## 参考
 

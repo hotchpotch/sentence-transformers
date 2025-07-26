@@ -150,6 +150,14 @@ class DataArguments:
         default=None,
         metadata={"help": "If set, filters rows with all-zero relevance and limits items per row to this number. Default: None (no filtering)"}
     )
+    filter_zero_relevance_max_items_reverse: bool = field(
+        default=False,
+        metadata={"help": "If True, sort by relevance average in ascending order (keep low relevance items). Default: False (keep high relevance items)"}
+    )
+    filter_keep_first_item: bool = field(
+        default=False,
+        metadata={"help": "If True, always keep the first item regardless of its relevance score. Default: False"}
+    )
 
 
 @dataclass
@@ -218,7 +226,7 @@ class PruningTrainingArguments(TrainingArguments):
     )
 
 
-def filter_pruning_dataset(dataset, max_items, num_proc=11):
+def filter_pruning_dataset(dataset, max_items, num_proc=11, reverse_sort=False, keep_first=False):
     """
     Filter dataset for pruning training:
     1. Remove items within each row where context_spans_relevance is all zeros
@@ -229,6 +237,8 @@ def filter_pruning_dataset(dataset, max_items, num_proc=11):
         dataset: HuggingFace dataset to filter
         max_items: Maximum number of items per row
         num_proc: Number of processes for parallel processing
+        reverse_sort: If True, sort by relevance in ascending order (keep low relevance items)
+        keep_first: If True, always keep the first item regardless of relevance
         
     Returns:
         Filtered dataset
@@ -245,9 +255,22 @@ def filter_pruning_dataset(dataset, max_items, num_proc=11):
         # Get the original length
         original_length = len(relevance)
         
+        # Initialize indices to keep
+        indices_to_keep = []
+        
+        # If keep_first is True, always include the first item
+        if keep_first and len(relevance) > 0:
+            indices_to_keep.append(0)
+            start_idx = 1  # Start processing from the second item
+            remaining_slots = max_items - 1
+        else:
+            start_idx = 0
+            remaining_slots = max_items
+        
         # Calculate average relevance for each item and collect non-zero items
         items_with_avg = []
-        for i, item in enumerate(relevance):
+        for i in range(start_idx, len(relevance)):
+            item = relevance[i]
             if isinstance(item, list):
                 # Calculate average relevance
                 avg_relevance = sum(item) / len(item) if len(item) > 0 else 0
@@ -259,9 +282,12 @@ def filter_pruning_dataset(dataset, max_items, num_proc=11):
                 if item != 0:
                     items_with_avg.append((i, item))
         
-        # Sort by average relevance (descending) and take top max_items
-        items_with_avg.sort(key=lambda x: x[1], reverse=True)
-        indices_to_keep = [idx for idx, _ in items_with_avg[:max_items]]
+        # Sort by average relevance and take remaining slots
+        # If reverse_sort is True, sort in ascending order (keep low relevance items)
+        if remaining_slots > 0:
+            items_with_avg.sort(key=lambda x: x[1], reverse=not reverse_sort)
+            indices_to_keep.extend([idx for idx, _ in items_with_avg[:remaining_slots]])
+        
         # Keep the indices in their original order
         indices_to_keep.sort()
         
@@ -353,7 +379,13 @@ def prepare_dataset(
         # Apply filtering if specified
         if data_args.filter_zero_relevance_max_items is not None:
             logger.info(f"Applying filtering to {dataset_name}:{subset} train set (removing zero-relevance items, max_items={data_args.filter_zero_relevance_max_items})")
-            train_ds = filter_pruning_dataset(train_ds, data_args.filter_zero_relevance_max_items, num_proc=11)
+            train_ds = filter_pruning_dataset(
+                train_ds, 
+                data_args.filter_zero_relevance_max_items, 
+                num_proc=11,
+                reverse_sort=data_args.filter_zero_relevance_max_items_reverse,
+                keep_first=data_args.filter_keep_first_item
+            )
             filtered_train_size = len(train_ds)
             logger.info(f"  → {dataset_name}:{subset} train: {original_train_size:,} → {filtered_train_size:,} samples ({filtered_train_size/original_train_size*100:.1f}% retained)")
         
@@ -381,7 +413,13 @@ def prepare_dataset(
             # Apply filtering if specified
             if data_args.filter_zero_relevance_max_items is not None:
                 logger.info(f"Applying filtering to {dataset_name}:{subset} {eval_split} set (removing zero-relevance items, max_items={data_args.filter_zero_relevance_max_items})")
-                eval_ds = filter_pruning_dataset(eval_ds, data_args.filter_zero_relevance_max_items, num_proc=11)
+                eval_ds = filter_pruning_dataset(
+                    eval_ds, 
+                    data_args.filter_zero_relevance_max_items, 
+                    num_proc=11,
+                    reverse_sort=data_args.filter_zero_relevance_max_items_reverse,
+                    keep_first=data_args.filter_keep_first_item
+                )
                 filtered_eval_size = len(eval_ds)
                 logger.info(f"  → {dataset_name}:{subset} {eval_split}: {original_eval_size:,} → {filtered_eval_size:,} samples ({filtered_eval_size/original_eval_size*100:.1f}% retained)")
             
@@ -664,7 +702,9 @@ def parse_config_file(config_file: str) -> Tuple[ModelArguments, DataArguments, 
         validation_split_name=data_config.get('validation_split_name', 'validation'),
         preprocessing_num_workers=data_config.get('preprocessing_num_workers', None),
         datasets=data_config.get('datasets', None),
-        filter_zero_relevance_max_items=data_config.get('filter_zero_relevance_max_items', None)
+        filter_zero_relevance_max_items=data_config.get('filter_zero_relevance_max_items', None),
+        filter_zero_relevance_max_items_reverse=data_config.get('filter_zero_relevance_max_items_reverse', False),
+        filter_keep_first_item=data_config.get('filter_keep_first_item', False)
     )
     
     # Extract training arguments
@@ -896,6 +936,13 @@ def main():
     
     # Set TrainingArguments run_name to match WandB
     training_args.run_name = run_name
+    
+    # Show warnings for filtering options
+    if data_args.filter_zero_relevance_max_items is not None:
+        if data_args.filter_zero_relevance_max_items_reverse:
+            logger.warning("⚠️  filter_zero_relevance_max_items_reverse is enabled: Keeping items with LOWER relevance scores (reverse sort)")
+        if data_args.filter_keep_first_item:
+            logger.warning("⚠️  filter_keep_first_item is enabled: Always keeping the first item regardless of relevance")
     
     # Load dataset with teacher scores
     train_dataset, eval_dataset = prepare_dataset(

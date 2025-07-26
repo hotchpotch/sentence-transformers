@@ -50,6 +50,7 @@ dependencies = [
     "wandb>=0.21.0",
     "matplotlib>=3.9.4",
     "nltk>=3.9.1",
+    "streamlit>=1.47.1",
 ]
 
 [project.urls]
