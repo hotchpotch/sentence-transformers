@@ -1,22 +1,22 @@
 [project]
-name = "sentence-transformers"
-version = "5.1.0.dev0"
-description = "Embeddings, Retrieval, and Reranking"
+name = "open-provence"
+version = "0.1.0"
+description = "Query-dependent text pruning for efficient RAG pipelines"
 license = { text = "Apache 2.0" }
 readme = "README.md"
 authors = [
-    { name = "Nils Reimers", email = "info@nils-reimers.de" },
-    { name = "Tom Aarsen", email = "tom.aarsen@huggingface.co" },
+    { name = "OpenProvence Contributors", email = "contact@example.com" }
 ]
 maintainers = [
-    { name = "Tom Aarsen", email = "tom.aarsen@huggingface.co" }
+    { name = "OpenProvence Contributors", email = "contact@example.com" }
 ]
 requires-python = ">=3.9"
 keywords = [
+    "Query-dependent pruning",
+    "Text pruning",
+    "RAG",
+    "Retrieval-Augmented Generation",
     "Transformer Networks",
-    "BERT",
-    "XLNet",
-    "sentence embedding",
     "PyTorch",
     "NLP",
     "deep learning",
@@ -54,23 +54,24 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://www.SBERT.net"
-Repository = "https://github.com/UKPLab/sentence-transformers/"
+Homepage = "https://github.com/example/open-provence"
+Repository = "https://github.com/example/open-provence"
 
 
 [project.optional-dependencies]
 train = ["datasets", "accelerate>=0.20.3"]
-onnx = ["optimum[onnxruntime]>=1.23.1"]
-onnx-gpu = ["optimum[onnxruntime-gpu]>=1.23.1"]
-openvino = ["optimum-intel[openvino]>=1.20.0"]
-dev = ["datasets", "accelerate>=0.20.3", "pre-commit", "pytest", "pytest-cov", "peft"]
+sentence-transformers = ["sentence-transformers>=2.0.0"]
+dev = ["datasets", "accelerate>=0.20.3", "pre-commit", "pytest", "pytest-cov"]
+
+[project.scripts]
+openprovence-train = "open_provence.runner:main"
 
 [build-system]
 requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["sentence_transformers*"]
+include = ["open_provence*"]
 namespaces = false
 
 [tool.ruff]
