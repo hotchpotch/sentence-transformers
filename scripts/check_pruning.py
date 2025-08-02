@@ -27,7 +27,7 @@ import torch
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from sentence_transformers.pruning import PruningEncoder
+from open_provence import OpenProvenceEncoder as PruningEncoder
 
 
 def analyze_pruning_simple(json_file, model_path, threshold=0.5, num_samples=10):

@@ -34,7 +34,7 @@ import torch
 from transformers import AutoTokenizer
 
 # Add parent directory to path to import open_provence
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from open_provence import OpenProvenceEncoder
 

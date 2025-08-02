@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Flexible training script for PruningEncoder with teacher score distillation.
+Flexible training script for OpenProvenceEncoder with teacher score distillation.
 Supports various configurations through command line arguments and config files.
 
 Usage:
@@ -49,11 +49,11 @@ from transformers import (
     AutoTokenizer
 )
 
-from sentence_transformers.pruning import (
-    PruningEncoder,
-    PruningTrainer,
-    PruningLoss,
-    PruningDataCollator
+from open_provence import (
+    OpenProvenceEncoder,
+    OpenProvenceTrainer,
+    OpenProvenceLoss,
+    OpenProvenceDataCollator
 )
 
 try:
@@ -161,7 +161,7 @@ class DataArguments:
 
 @dataclass
 class PruningTrainingArguments(TrainingArguments):
-    """Training arguments specific to PruningEncoder training."""
+    """Training arguments specific to OpenProvenceEncoder training."""
     output_dir: Optional[str] = field(
         default=None,
         metadata={"help": "Output directory for model and checkpoints. Format example: ./output/japanese-reranker-xsmall-v2_reranking-pruning_minimal_20250111_123456"}
@@ -334,7 +334,7 @@ def prepare_dataset(
     seed: int = 42
 ) -> Tuple[Any, Any]:
     """
-    Load dataset with filtering - let PruningDataCollator handle the processing.
+    Load dataset with filtering - let OpenProvenceDataCollator handle the processing.
     
     Args:
         data_args: Data arguments containing dataset info
@@ -875,7 +875,7 @@ def main():
     logger.info(f"  Logging steps: {logging_steps} (100 logs)")
     logger.info(f"  Save steps: {training_args.save_steps}")
     
-    # Initialize PruningEncoder
+    # Initialize OpenProvenceEncoder
     # Determine num_labels
     if model_args.num_labels is not None:
         num_labels = model_args.num_labels
@@ -896,8 +896,8 @@ def main():
             num_labels = 2  # Default for 2-class classification
             logger.info(f"Could not detect num_labels, using default={num_labels}")
     
-    logger.info(f"Initializing PruningEncoder with {model_args.model_name_or_path} in {model_args.mode} mode")
-    model = PruningEncoder(
+    logger.info(f"Initializing OpenProvenceEncoder with {model_args.model_name_or_path} in {model_args.mode} mode")
+    model = OpenProvenceEncoder(
         model_name_or_path=model_args.model_name_or_path,
         num_labels=num_labels,
         max_length=model_args.max_length,
@@ -913,7 +913,7 @@ def main():
     # Always use 'teacher_score' since we rename it in prepare_dataset
     teacher_score_column = "teacher_score"
     logger.info(f"Using teacher score column: {teacher_score_column}")
-    data_collator = PruningDataCollator(
+    data_collator = OpenProvenceDataCollator(
         tokenizer=model.tokenizer,
         max_length=model.max_length,
         mode=model.mode,
@@ -924,7 +924,7 @@ def main():
     )
     
     # Create loss function
-    loss_fn = PruningLoss(
+    loss_fn = OpenProvenceLoss(
         model=model,
         mode=model.mode,
         ranking_weight=training_args.ranking_weight,
@@ -932,9 +932,9 @@ def main():
         is_regression=True  # Regression task for teacher score distillation
     )
     
-    # Use PruningTrainer (now based on HuggingFace Trainer)
-    logger.info("Using PruningTrainer")
-    trainer = PruningTrainer(
+    # Use OpenProvenceTrainer (now based on HuggingFace Trainer)
+    logger.info("Using OpenProvenceTrainer")
+    trainer = OpenProvenceTrainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
@@ -982,7 +982,7 @@ def main():
     logger.info("="*50)
     
     # Load the saved model
-    loaded_model = PruningEncoder.from_pretrained(final_model_path)
+    loaded_model = OpenProvenceEncoder.from_pretrained(final_model_path)
     
     # Example queries and documents
     test_examples = [
@@ -1037,13 +1037,13 @@ def main():
     print(f"\n{'='*80}")
     print("🎉 Training completed successfully!")
     print(f"📁 Model saved to: {final_model_path}")
-    print(f"🚀 To use this model: PruningEncoder.from_pretrained('{final_model_path}')")
+    print(f"🚀 To use this model: OpenProvenceEncoder.from_pretrained('{final_model_path}')")
     print(f"{'='*80}\n")
     
     logger.info("\n" + "="*50)
     logger.info("Training completed successfully!")
     logger.info(f"Model saved to: {final_model_path}")
-    logger.info(f"To use this model: PruningEncoder.from_pretrained('{final_model_path}')")
+    logger.info(f"To use this model: OpenProvenceEncoder.from_pretrained('{final_model_path}')")
 
 
 if __name__ == "__main__":

@@ -36,7 +36,7 @@ from transformers import AutoTokenizer
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from sentence_transformers.pruning import PruningEncoder
+from open_provence import OpenProvenceEncoder as PruningEncoder
 
 
 def format_context_with_del(context: str, should_delete: bool) -> str:
