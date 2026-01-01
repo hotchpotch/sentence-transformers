@@ -47,7 +47,7 @@ class CachedMultipleNegativesBidirectionalRankingLoss(nn.Module):
     def __init__(
         self,
         model: SentenceTransformer,
-        scale: float = 100.0,
+        temperature: float = 0.01,
         similarity_fct: callable[[Tensor, Tensor], Tensor] = util.cos_sim,
         mini_batch_size: int = 32,
         gather_across_devices: bool = False,
@@ -61,9 +61,8 @@ class CachedMultipleNegativesBidirectionalRankingLoss(nn.Module):
 
         Args:
             model: SentenceTransformer model
-            scale: Output of similarity function is multiplied by scale value. In some literature, the scaling parameter
-                is referred to as temperature, which is the inverse of the scale. In short: scale = 1 / temperature, so
-                scale=100.0 is equivalent to temperature=0.01.
+            temperature: Temperature parameter to scale the similarities. The internal scale is derived as
+                ``scale = 1 / temperature``, so temperature=0.01 is equivalent to scale=100.0.
             similarity_fct: similarity function between sentence embeddings. By default, cos_sim. Can also be set to dot
                 product (and then set scale to 1)
             mini_batch_size: Mini-batch size for the forward pass, this denotes how much memory is actually used during
@@ -130,7 +129,9 @@ class CachedMultipleNegativesBidirectionalRankingLoss(nn.Module):
             )
 
         self.model = model
-        self.scale = scale
+        if temperature <= 0:
+            raise ValueError("temperature must be > 0.")
+        self.temperature = temperature
         self.similarity_fct = similarity_fct
         self.mini_batch_size = mini_batch_size
         self.gather_across_devices = gather_across_devices
@@ -286,8 +287,12 @@ class CachedMultipleNegativesBidirectionalRankingLoss(nn.Module):
 
     def get_config_dict(self) -> dict[str, Any]:
         return {
-            "scale": self.scale,
+            "temperature": self.temperature,
             "similarity_fct": self.similarity_fct.__name__,
             "mini_batch_size": self.mini_batch_size,
             "gather_across_devices": self.gather_across_devices,
         }
+
+    @property
+    def scale(self) -> float:
+        return 1.0 / self.temperature

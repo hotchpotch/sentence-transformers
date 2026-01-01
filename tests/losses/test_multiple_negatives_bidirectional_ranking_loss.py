@@ -15,14 +15,14 @@ from sentence_transformers import InputExample, SentenceTransformer, losses, uti
 def test_bidirectional_info_nce_manual_formula():
     loss = losses.MultipleNegativesBidirectionalRankingLoss(
         model=Mock(spec=SentenceTransformer),
-        scale=1.0,
+        temperature=1.0,
         similarity_fct=util.dot_score,
     )
     queries = torch.tensor([[1.0, 2.0], [0.3, -1.2]])
     docs = torch.tensor([[-0.7, 0.5], [1.5, -0.4]])
 
     computed = loss.compute_loss_from_embeddings([queries, docs], labels=None)
-    # Manual check (dot similarity, scale=1.0):
+    # Manual check (dot similarity, temperature=1.0):
     # For q1=[1,2], d1=[-0.7,0.5], q2=[0.3,-1.2], d2=[1.5,-0.4],
     # the per-sample losses computed from
     #   L_i = -log( exp(s(q_i,d_i)) / Z_i ),
