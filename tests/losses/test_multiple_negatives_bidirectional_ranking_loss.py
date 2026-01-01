@@ -12,12 +12,30 @@ from transformers import set_seed
 from sentence_transformers import InputExample, SentenceTransformer, losses, util
 
 
+class _DummyModel:
+    def __getitem__(self, idx):
+        return object()
+
+
+def test_temperature_default_scale_property():
+    loss = losses.MultipleNegativesBidirectionalRankingLoss(model=Mock(spec=SentenceTransformer))
+    assert pytest.approx(loss.temperature) == 0.01
+    assert pytest.approx(loss.scale) == 100.0
+
+    cached_loss = losses.CachedMultipleNegativesBidirectionalRankingLoss(model=_DummyModel())
+    assert pytest.approx(cached_loss.temperature) == 0.01
+    assert pytest.approx(cached_loss.scale) == 100.0
+
+
 def test_bidirectional_info_nce_manual_formula():
     loss = losses.MultipleNegativesBidirectionalRankingLoss(
         model=Mock(spec=SentenceTransformer),
         temperature=1.0,
         similarity_fct=util.dot_score,
     )
+    # NOTE: This test uses dot_score (not the default cos_sim) purely to keep the
+    # manual calculation simple and exact. The default similarity in the loss is
+    # cosine similarity (with L2 normalization).
     queries = torch.tensor([[1.0, 2.0], [0.3, -1.2]])
     docs = torch.tensor([[-0.7, 0.5], [1.5, -0.4]])
 
@@ -29,6 +47,24 @@ def test_bidirectional_info_nce_manual_formula():
     # with Z_i summing q->d, q->q (j!=i), d->q, d->d (j!=i),
     # are 1.4169083311926611 and 1.1414837565860692, so the mean is:
     expected = 1.2791960438893653
+
+    assert pytest.approx(computed.item(), rel=1e-6) == expected
+
+
+def test_bidirectional_info_nce_temperature_value():
+    loss = losses.MultipleNegativesBidirectionalRankingLoss(
+        model=Mock(spec=SentenceTransformer),
+        temperature=0.01,
+        similarity_fct=util.dot_score,
+    )
+    queries = torch.tensor([[0.1, 0.0], [0.0, 0.1]])
+    docs = torch.tensor([[0.1, 0.0], [0.0, -0.1]])
+
+    computed = loss.compute_loss_from_embeddings([queries, docs], labels=None)
+    # Manual check (dot similarity, temperature=0.01 -> scale=100.0):
+    # Per-sample losses are 1.2445918944919965 and 2.5551419846181966,
+    # so the mean is:
+    expected = 1.8998669395550967
 
     assert pytest.approx(computed.item(), rel=1e-6) == expected
 
