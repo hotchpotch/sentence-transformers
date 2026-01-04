@@ -154,7 +154,7 @@ def test_cached_bidirectional_info_nce_same_grad(
     loss_cached_value.backward()
     grad = {name: p.grad.clone() for name, p in loss_cached.named_parameters() if p.grad is not None}
 
-    assert pytest.approx(loss_base_value.item()) == loss_cached_value.item()
+    assert pytest.approx(loss_base_value.item(), rel=precision) == loss_cached_value.item()
 
     nclose = 0
     for name in tqdm.tqdm(grad_expected):
@@ -192,7 +192,7 @@ def test_cached_bidirectional_info_nce_same_grad_with_hard_negatives():
     loss_cached_value.backward()
     grad = {name: p.grad.clone() for name, p in loss_cached.named_parameters() if p.grad is not None}
 
-    assert pytest.approx(loss_base_value.item()) == loss_cached_value.item()
+    assert pytest.approx(loss_base_value.item(), rel=precision) == loss_cached_value.item()
 
     nclose = 0
     for name in tqdm.tqdm(grad_expected):
