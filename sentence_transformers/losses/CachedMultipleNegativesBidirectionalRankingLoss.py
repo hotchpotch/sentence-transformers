@@ -76,7 +76,8 @@ class CachedMultipleNegativesBidirectionalRankingLoss(nn.Module):
 
         Requirements:
             1. (anchor, positive) pairs or (anchor, positive, negative) triplets
-            2. Should be used with large `per_device_train_batch_size` and low `mini_batch_size` for superior performance,
+            2. Optional negatives are supported as hard negatives (additional documents).
+            3. Should be used with large `per_device_train_batch_size` and low `mini_batch_size` for superior performance,
                but slower training time than :class:`MultipleNegativesBidirectionalRankingLoss`.
 
         Inputs:

@@ -49,6 +49,7 @@ class MultipleNegativesBidirectionalRankingLoss(nn.Module):
 
         Requirements:
             1. (anchor, positive) pairs or (anchor, positive, negative) triplets
+            2. Optional negatives are supported as hard negatives (additional documents).
 
         Inputs:
             +-------------------------------------------------+--------+
