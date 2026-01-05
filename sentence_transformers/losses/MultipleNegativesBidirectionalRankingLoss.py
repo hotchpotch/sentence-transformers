@@ -16,7 +16,7 @@ class MultipleNegativesBidirectionalRankingLoss(nn.Module):
         self,
         model: SentenceTransformer,
         temperature: float = 0.01,
-        similarity_fct=util.cos_sim,
+        similarity_fct: callable[[Tensor, Tensor], Tensor] = util.cos_sim,
         gather_across_devices: bool = False,
     ) -> None:
         """
