@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Iterator
@@ -350,3 +351,119 @@ class ProportionalBatchSampler(MultiDatasetDefaultBatchSampler):
 
     def __len__(self) -> int:
         return sum([len(sampler) for sampler in self.batch_samplers])
+
+
+class SmoothedProportionalBatchSampler(MultiDatasetDefaultBatchSampler):
+    """
+    Batch sampler that samples from each dataset with probability proportional to its size raised to ``smoothing``.
+    This smooths the dataset size distribution so smaller datasets are sampled relatively more often.
+
+    Notes:
+        With this sampler, a single epoch always yields ``sum(len(batch_sampler_i))`` batches.
+        Because the sampling distribution is smoothed, large datasets may not be fully covered in one epoch, while
+        small datasets may be sampled multiple times. If you need an exact total number of steps, prefer training
+        with an explicit step count (e.g., ``max_steps``) rather than relying on epochs.
+
+    Args:
+        dataset (ConcatDataset): A concatenation of multiple datasets.
+        batch_samplers (List[BatchSampler]): A list of batch samplers, one for each dataset in the ConcatDataset.
+        generator (torch.Generator, optional): A generator for reproducible sampling. Defaults to None.
+        seed (int): Seed for the random number generator to ensure reproducibility. Defaults to 0.
+        smoothing (float): Exponent to apply to dataset sizes. ``1.0`` is proportional, ``0.0`` is uniform.
+    """
+
+    def __init__(
+        self,
+        dataset: ConcatDataset,
+        batch_samplers: list[BatchSampler],
+        generator: torch.Generator | None = None,
+        seed: int = 0,
+        smoothing: float = 0.5,
+    ) -> None:
+        super().__init__(dataset, batch_samplers=batch_samplers, generator=generator, seed=seed)
+
+        if not math.isfinite(smoothing) or smoothing < 0:
+            raise ValueError("smoothing must be a non-negative finite float.")
+
+        self.smoothing = float(smoothing)
+        self._dataset_sizes = [len(dataset) for dataset in self.dataset.datasets]
+        self._num_batches = [len(sampler) for sampler in self.batch_samplers]
+        self._active_indices = [idx for idx, num_batches in enumerate(self._num_batches) if num_batches > 0]
+
+        if not self._active_indices:
+            raise ValueError("All batch samplers are empty.")
+
+    def _compute_weights(self, active_indices: list[int]) -> torch.Tensor:
+        sizes = torch.tensor([self._dataset_sizes[idx] for idx in active_indices], dtype=torch.float64)
+        weights = sizes.pow(self.smoothing)
+        return weights / weights.sum()
+
+    def _reset_batch_sampler_iter(
+        self,
+        dataset_idx: int,
+        batch_sampler_iters: dict[int, Iterator[list[int]]],
+        reset_counts: dict[int, int],
+    ) -> None:
+        reset_counts[dataset_idx] += 1
+        batch_sampler = self.batch_samplers[dataset_idx]
+        if hasattr(batch_sampler, "set_epoch"):
+            batch_sampler.set_epoch(self.epoch + reset_counts[dataset_idx])
+        batch_sampler_iters[dataset_idx] = iter(batch_sampler)
+
+    def _next_batch(
+        self,
+        dataset_idx: int,
+        batch_sampler_iters: dict[int, Iterator[list[int]]],
+        reset_counts: dict[int, int],
+    ) -> list[int] | None:
+        try:
+            return next(batch_sampler_iters[dataset_idx])
+        except StopIteration:
+            self._reset_batch_sampler_iter(dataset_idx, batch_sampler_iters, reset_counts)
+
+        try:
+            return next(batch_sampler_iters[dataset_idx])
+        except StopIteration:
+            return None
+
+    def __iter__(self) -> Iterator[list[int]]:
+        dataset_generator = torch.Generator()
+        if self.seed is not None:
+            dataset_generator.manual_seed(self.seed + self.epoch)
+
+        active_indices = list(self._active_indices)
+        batch_sampler_iters = {}
+        reset_counts = {idx: 0 for idx in active_indices}
+
+        for idx in active_indices:
+            batch_sampler = self.batch_samplers[idx]
+            if hasattr(batch_sampler, "set_epoch"):
+                batch_sampler.set_epoch(self.epoch)
+            batch_sampler_iters[idx] = iter(batch_sampler)
+
+        sample_offsets = [0] + list(accumulate(self._dataset_sizes))
+        weights = self._compute_weights(active_indices)
+        num_batches = len(self)
+
+        for _ in range(num_batches):
+            while True:
+                if not active_indices:
+                    return
+
+                dataset_pos = torch.multinomial(weights, 1, generator=dataset_generator).item()
+                dataset_idx = active_indices[dataset_pos]
+                batch = self._next_batch(dataset_idx, batch_sampler_iters, reset_counts)
+                if batch is None:
+                    active_indices.remove(dataset_idx)
+                    batch_sampler_iters.pop(dataset_idx, None)
+                    reset_counts.pop(dataset_idx, None)
+                    if not active_indices:
+                        return
+                    weights = self._compute_weights(active_indices)
+                    continue
+
+                yield [idx + sample_offsets[dataset_idx] for idx in batch]
+                break
+
+    def __len__(self) -> int:
+        return sum(self._num_batches[idx] for idx in self._active_indices)

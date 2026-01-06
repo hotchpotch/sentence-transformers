@@ -31,6 +31,7 @@ from sentence_transformers.sampler import (
     GroupByLabelBatchSampler,
     MultiDatasetDefaultBatchSampler,
     NoDuplicatesBatchSampler,
+    SmoothedProportionalBatchSampler,
     ProportionalBatchSampler,
     RoundRobinBatchSampler,
 )
@@ -716,6 +717,12 @@ class SentenceTransformerTrainer(Trainer):
         if inspect.isclass(self.args.multi_dataset_batch_sampler) and issubclass(
             self.args.multi_dataset_batch_sampler, MultiDatasetDefaultBatchSampler
         ):
+            if issubclass(self.args.multi_dataset_batch_sampler, SmoothedProportionalBatchSampler):
+                return self.args.multi_dataset_batch_sampler(
+                    dataset,
+                    **multi_batch_sampler_kwargs,
+                    smoothing=self.args.multi_dataset_batch_sampler_smoothing,
+                )
             return self.args.multi_dataset_batch_sampler(dataset, **multi_batch_sampler_kwargs)
 
         # If it's a callable, call it
@@ -728,6 +735,13 @@ class SentenceTransformerTrainer(Trainer):
 
         if self.args.multi_dataset_batch_sampler == MultiDatasetBatchSamplers.PROPORTIONAL:
             return ProportionalBatchSampler(dataset=dataset, **multi_batch_sampler_kwargs)
+
+        if self.args.multi_dataset_batch_sampler == MultiDatasetBatchSamplers.SMOOTHED_PROPORTIONAL:
+            return SmoothedProportionalBatchSampler(
+                dataset=dataset,
+                **multi_batch_sampler_kwargs,
+                smoothing=self.args.multi_dataset_batch_sampler_smoothing,
+            )
 
     def get_train_dataloader(self) -> DataLoader:
         """

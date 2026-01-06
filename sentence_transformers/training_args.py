@@ -98,6 +98,13 @@ class MultiDatasetBatchSamplers(ExplicitEnum):
     - ``MultiDatasetBatchSamplers.PROPORTIONAL``: **[default]** Uses :class:`~sentence_transformers.sampler.ProportionalBatchSampler`,
       which samples from each dataset in proportion to its size.
       With this strategy, all samples from each dataset are used and larger datasets are sampled from more frequently.
+    - ``MultiDatasetBatchSamplers.SMOOTHED_PROPORTIONAL``: Uses
+      :class:`~sentence_transformers.sampler.SmoothedProportionalBatchSampler`, which samples from each dataset with
+      probability proportional to its size raised to ``smoothing``. Smaller datasets are sampled relatively more often
+      when ``smoothing < 1``. Configure ``smoothing`` with ``multi_dataset_batch_sampler_smoothing``.
+      Note that this sampler always yields ``sum(len(batch_sampler_i))`` batches per epoch, so large datasets may not
+      be fully covered while small datasets may be sampled multiple times. If you need an exact number of steps,
+      prefer training with ``max_steps`` rather than relying on epochs.
 
     If you want to use a custom multi-dataset batch sampler, then you can subclass
     :class:`~sentence_transformers.sampler.MultiDatasetDefaultBatchSampler` and pass the class (not an instance) to the
@@ -153,6 +160,7 @@ class MultiDatasetBatchSamplers(ExplicitEnum):
 
     ROUND_ROBIN = "round_robin"  # Round-robin sampling from each dataset
     PROPORTIONAL = "proportional"  # Sample from each dataset in proportion to its size [default]
+    SMOOTHED_PROPORTIONAL = "smoothed_proportional"  # Sample from each dataset proportional to size**smoothing
 
 
 @dataclass
@@ -184,6 +192,9 @@ class SentenceTransformerTrainingArguments(TransformersTrainingArguments):
         multi_dataset_batch_sampler (Union[:class:`~sentence_transformers.training_args.MultiDatasetBatchSamplers`, `str`, :class:`~sentence_transformers.sampler.MultiDatasetDefaultBatchSampler`, Callable[[...], :class:`~sentence_transformers.sampler.MultiDatasetDefaultBatchSampler`]], *optional*):
             The multi-dataset batch sampler to use. See :class:`~sentence_transformers.training_args.MultiDatasetBatchSamplers`
             for valid options. Defaults to ``MultiDatasetBatchSamplers.PROPORTIONAL``.
+        multi_dataset_batch_sampler_smoothing (`float`, *optional*):
+            Exponent to apply to dataset sizes when using
+            ``MultiDatasetBatchSamplers.SMOOTHED_PROPORTIONAL``. ``1.0`` is proportional, ``0.0`` is uniform.
         router_mapping (`Dict[str, str] | Dict[str, Dict[str, str]]`, *optional*):
             A mapping of dataset column names to Router routes, like "query" or "document". This is used to specify
             which Router submodule to use for each dataset. Two formats are accepted:
@@ -228,6 +239,12 @@ class SentenceTransformerTrainingArguments(TransformersTrainingArguments):
         MultiDatasetBatchSamplers, str, MultiDatasetDefaultBatchSampler, Callable[..., MultiDatasetDefaultBatchSampler]
     ] = field(
         default=MultiDatasetBatchSamplers.PROPORTIONAL, metadata={"help": "The multi-dataset batch sampler to use."}
+    )
+    multi_dataset_batch_sampler_smoothing: float = field(
+        default=0.5,
+        metadata={
+            "help": "Exponent to apply to dataset sizes when using the smoothed_proportional multi-dataset batch sampler."
+        },
     )
     router_mapping: Union[str, None, dict[str, str], dict[str, dict[str, str]]] = field(  # noqa: UP007
         default_factory=dict,
