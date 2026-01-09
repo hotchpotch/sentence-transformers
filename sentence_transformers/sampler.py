@@ -386,6 +386,7 @@ class NoDuplicatesFastBatchSampler(DefaultBatchSampler):
         columns = list(self.dataset.column_names)
         # Precompute hash values once to avoid repeated string processing per batch.
         # Use num_proc to parallelize hashing across CPU cores.
+        hash_ds: Dataset | None = None
         hash_ds = self.dataset.map(
             _hash_batch,
             batched=True,
@@ -419,7 +420,8 @@ class NoDuplicatesFastBatchSampler(DefaultBatchSampler):
                 row_hashes = values.reshape((row_count, row_size))
         except Exception as exc:
             # Surface failures explicitly; the fast sampler expects fixed-length rows.
-            del hash_ds
+            if hash_ds is not None:
+                del hash_ds
             raise ValueError(
                 "NoDuplicatesFastBatchSampler requires fixed-length hash rows. "
                 "Ensure each sample has the same number of values across columns."
@@ -427,7 +429,8 @@ class NoDuplicatesFastBatchSampler(DefaultBatchSampler):
 
         self._row_hashes = row_hashes
         # Drop the temporary dataset to release Arrow buffers promptly.
-        del hash_ds
+        if hash_ds is not None:
+            del hash_ds
 
     def __iter__(self) -> Iterator[list[int]]:
         if self.generator and self.seed is not None:
