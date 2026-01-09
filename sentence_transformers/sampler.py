@@ -368,8 +368,7 @@ class NoDuplicatesFastBatchSampler(DefaultBatchSampler):
         )
         if xxhash is None:
             raise ImportError(
-                "NoDuplicatesFastBatchSampler requires `xxhash`. Install it via `pip install xxhash` "
-                "or use the `train` extra."
+                "NoDuplicatesFastBatchSampler requires `xxhash`. Install `xxhash` to use this sampler."
             )
         self.dataset = _remove_label_columns(dataset, self.valid_label_columns)
         cpu_count = os.cpu_count() or 1
