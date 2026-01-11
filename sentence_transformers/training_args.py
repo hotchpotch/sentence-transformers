@@ -103,6 +103,9 @@ class MultiDatasetBatchSamplers(ExplicitEnum):
     - ``MultiDatasetBatchSamplers.PROPORTIONAL``: **[default]** Uses :class:`~sentence_transformers.sampler.ProportionalBatchSampler`,
       which samples from each dataset in proportion to its size.
       With this strategy, all samples from each dataset are used and larger datasets are sampled from more frequently.
+    - ``MultiDatasetBatchSamplers.SMOOTH_PROPORTIONAL``: Uses :class:`~sentence_transformers.sampler.SmoothProportionalBatchSampler`,
+      which samples from each dataset in proportion to its batch count raised to ``alpha`` (default: 0.5).
+      With this strategy, datasets are sampled more smoothly and datasets may be re-sampled within an epoch.
 
     If you want to use a custom multi-dataset batch sampler, then you can subclass
     :class:`~sentence_transformers.sampler.MultiDatasetDefaultBatchSampler` and pass the class (not an instance) to the
@@ -158,6 +161,7 @@ class MultiDatasetBatchSamplers(ExplicitEnum):
 
     ROUND_ROBIN = "round_robin"  # Round-robin sampling from each dataset
     PROPORTIONAL = "proportional"  # Sample from each dataset in proportion to its size [default]
+    SMOOTH_PROPORTIONAL = "smooth_proportional"  # Sample from each dataset in proportion to its batch count^alpha
 
 
 @dataclass

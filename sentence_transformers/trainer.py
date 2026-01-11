@@ -34,6 +34,7 @@ from sentence_transformers.sampler import (
     NoDuplicatesFastBatchSampler,
     ProportionalBatchSampler,
     RoundRobinBatchSampler,
+    SmoothProportionalBatchSampler,
 )
 from sentence_transformers.training_args import (
     BatchSamplers,
@@ -732,6 +733,9 @@ class SentenceTransformerTrainer(Trainer):
 
         if self.args.multi_dataset_batch_sampler == MultiDatasetBatchSamplers.PROPORTIONAL:
             return ProportionalBatchSampler(dataset=dataset, **multi_batch_sampler_kwargs)
+
+        if self.args.multi_dataset_batch_sampler == MultiDatasetBatchSamplers.SMOOTH_PROPORTIONAL:
+            return SmoothProportionalBatchSampler(dataset=dataset, **multi_batch_sampler_kwargs)
 
     def get_train_dataloader(self) -> DataLoader:
         """

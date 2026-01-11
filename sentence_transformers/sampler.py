@@ -566,3 +566,67 @@ class ProportionalBatchSampler(MultiDatasetDefaultBatchSampler):
 
     def __len__(self) -> int:
         return sum([len(sampler) for sampler in self.batch_samplers])
+
+
+class SmoothProportionalBatchSampler(MultiDatasetDefaultBatchSampler):
+    """
+    Batch sampler that samples from each dataset in proportion to its batch count raised to ``alpha``.
+    With this sampler, the number of batches per epoch matches the sum of the individual batch samplers,
+    and datasets may be re-sampled (wrapped) once their batch samplers are exhausted.
+
+    Args:
+        dataset (ConcatDataset): A concatenation of multiple datasets.
+        batch_samplers (List[BatchSampler]): A list of batch samplers, one for each dataset in the ConcatDataset.
+        alpha (float): Smoothing factor for dataset batch counts. ``alpha=1`` is proportional sampling,
+            ``alpha=0`` is uniform sampling. Defaults to 0.5.
+        generator (torch.Generator, optional): A generator for reproducible sampling. Defaults to None.
+        seed (int): Seed for the random number generator to ensure reproducibility. Defaults to 0.
+    """
+
+    def __init__(
+        self,
+        dataset: ConcatDataset,
+        batch_samplers: list[BatchSampler],
+        alpha: float = 0.5,
+        generator: torch.Generator | None = None,
+        seed: int = 0,
+    ) -> None:
+        super().__init__(dataset, batch_samplers=batch_samplers, generator=generator, seed=seed)
+        self.alpha = alpha
+
+    def __iter__(self) -> Iterator[list[int]]:
+        if self.generator and self.seed is not None:
+            self.generator.manual_seed(self.seed + self.epoch)
+
+        num_samples = [len(dataset) for dataset in self.dataset.datasets]
+        sample_offsets = [0] + list(accumulate(num_samples))
+
+        num_batches = [len(sampler) for sampler in self.batch_samplers]
+        total_batches = sum(num_batches)
+        if total_batches == 0:
+            return
+
+        weights = torch.tensor(num_batches, dtype=torch.float)
+        if self.alpha == 0:
+            weights = (weights > 0).float()
+        else:
+            weights = weights.pow(self.alpha)
+
+        if weights.sum() == 0:
+            return
+
+        dataset_indices = torch.multinomial(weights, total_batches, replacement=True, generator=self.generator).tolist()
+
+        batch_samplers = [iter(sampler) for sampler in self.batch_samplers]
+        for dataset_idx in dataset_indices:
+            sample_offset = sample_offsets[dataset_idx]
+            try:
+                batch = next(batch_samplers[dataset_idx])
+            except StopIteration:
+                batch_samplers[dataset_idx] = iter(self.batch_samplers[dataset_idx])
+                batch = next(batch_samplers[dataset_idx])
+
+            yield [idx + sample_offset for idx in batch]
+
+    def __len__(self) -> int:
+        return sum([len(sampler) for sampler in self.batch_samplers])

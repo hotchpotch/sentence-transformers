@@ -60,6 +60,20 @@ def test_hf_argument_parser_no_duplicates_fast():
     assert args.batch_sampler == BatchSamplers.NO_DUPLICATES_FAST
 
 
+def test_hf_argument_parser_smooth_proportional():
+    parser = HfArgumentParser((SentenceTransformerTrainingArguments,))
+    dataclasses = parser.parse_args_into_dataclasses(
+        args=[
+            "--output_dir",
+            "test_output_dir",
+            "--multi_dataset_batch_sampler",
+            "smooth_proportional",
+        ]
+    )
+    args = dataclasses[0]
+    assert args.multi_dataset_batch_sampler == MultiDatasetBatchSamplers.SMOOTH_PROPORTIONAL
+
+
 @pytest.mark.parametrize("argument_name", ["router_mapping", "learning_rate_mapping"])
 def test_hf_argument_parser_incorrect_string_arguments(argument_name):
     parser = HfArgumentParser((SentenceTransformerTrainingArguments,))
