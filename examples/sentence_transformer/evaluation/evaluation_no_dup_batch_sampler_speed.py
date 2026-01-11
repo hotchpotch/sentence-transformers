@@ -237,6 +237,7 @@ class _RssReport:
 
 class _RssSampler:
     """Sample RSS (including child processes) during hashing."""
+
     def __init__(self, interval: float = 0.1) -> None:
         self.interval = interval
         self._stop_event = threading.Event()
@@ -297,6 +298,7 @@ class _UssReport:
 
 class _UssSampler:
     """Sample USS (including child processes) during hashing."""
+
     def __init__(self, interval: float = 0.1) -> None:
         self.interval = interval
         self._stop_event = threading.Event()
@@ -344,6 +346,7 @@ class _UssSampler:
 
     def report(self) -> _UssReport:
         return _UssReport(self._start_uss, self._end_uss, self._peak_uss)
+
 
 def _dup_stats(dataset: Dataset, show_progress: bool, desc: str) -> tuple[int, int, int]:
     """Compute total/unique/dup counts across query/doc columns."""

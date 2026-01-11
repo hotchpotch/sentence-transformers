@@ -58,9 +58,7 @@ def dummy_duplicates_dataset() -> Dataset:
 def test_group_by_label_batch_sampler_label_a(dummy_dataset: Dataset, sampler_cls) -> None:
     batch_size = 10
 
-    sampler = sampler_cls(
-        dataset=dummy_dataset, batch_size=batch_size, drop_last=True, valid_label_columns=["label"]
-    )
+    sampler = sampler_cls(dataset=dummy_dataset, batch_size=batch_size, drop_last=True, valid_label_columns=["label"])
 
     batches = list(iter(sampler))
 
