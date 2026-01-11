@@ -594,28 +594,34 @@ class SmoothProportionalBatchSampler(MultiDatasetDefaultBatchSampler):
         super().__init__(dataset, batch_samplers=batch_samplers, generator=generator, seed=seed)
         self.alpha = alpha
 
-    def __iter__(self) -> Iterator[list[int]]:
+    def _get_sampling_weights(self, num_batches: list[int]) -> torch.Tensor:
+        weights = torch.tensor(num_batches, dtype=torch.float)
+        if self.alpha == 0:
+            return (weights > 0).float()
+        return weights.pow(self.alpha)
+
+    def _get_dataset_indices(self, num_batches: list[int]) -> list[int]:
         if self.generator and self.seed is not None:
             self.generator.manual_seed(self.seed + self.epoch)
 
+        total_batches = sum(num_batches)
+        if total_batches == 0:
+            return []
+
+        weights = self._get_sampling_weights(num_batches)
+        if weights.sum() == 0:
+            return []
+
+        return torch.multinomial(weights, total_batches, replacement=True, generator=self.generator).tolist()
+
+    def __iter__(self) -> Iterator[list[int]]:
         num_samples = [len(dataset) for dataset in self.dataset.datasets]
         sample_offsets = [0] + list(accumulate(num_samples))
 
         num_batches = [len(sampler) for sampler in self.batch_samplers]
-        total_batches = sum(num_batches)
-        if total_batches == 0:
+        dataset_indices = self._get_dataset_indices(num_batches)
+        if not dataset_indices:
             return
-
-        weights = torch.tensor(num_batches, dtype=torch.float)
-        if self.alpha == 0:
-            weights = (weights > 0).float()
-        else:
-            weights = weights.pow(self.alpha)
-
-        if weights.sum() == 0:
-            return
-
-        dataset_indices = torch.multinomial(weights, total_batches, replacement=True, generator=self.generator).tolist()
 
         batch_samplers = [iter(sampler) for sampler in self.batch_samplers]
         for dataset_idx in dataset_indices:
@@ -627,6 +633,38 @@ class SmoothProportionalBatchSampler(MultiDatasetDefaultBatchSampler):
                 batch = next(batch_samplers[dataset_idx])
 
             yield [idx + sample_offset for idx in batch]
+
+    def get_sampling_statistics(self) -> dict[str, list[float] | list[int] | int]:
+        # Provide expected vs. sampled batch counts using the same dataset draw logic as __iter__.
+        num_batches = [len(sampler) for sampler in self.batch_samplers]
+        total_batches = sum(num_batches)
+        weights = self._get_sampling_weights(num_batches)
+
+        if total_batches == 0 or weights.sum() == 0:
+            return {
+                "num_batches": num_batches,
+                "total_batches": total_batches,
+                "sampling_weights": weights.tolist(),
+                "sampling_probabilities": [0.0 for _ in num_batches],
+                "expected_batches": [0.0 for _ in num_batches],
+                "dataset_indices": [],
+                "sampled_batch_counts": [0 for _ in num_batches],
+            }
+
+        probabilities = (weights / weights.sum()).tolist()
+        expected_batches = [total_batches * prob for prob in probabilities]
+        dataset_indices = self._get_dataset_indices(num_batches)
+        sampled_batch_counts = [dataset_indices.count(idx) for idx in range(len(num_batches))]
+
+        return {
+            "num_batches": num_batches,
+            "total_batches": total_batches,
+            "sampling_weights": weights.tolist(),
+            "sampling_probabilities": probabilities,
+            "expected_batches": expected_batches,
+            "dataset_indices": dataset_indices,
+            "sampled_batch_counts": sampled_batch_counts,
+        }
 
     def __len__(self) -> int:
         return sum([len(sampler) for sampler in self.batch_samplers])

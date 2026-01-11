@@ -55,11 +55,14 @@ def test_smooth_proportional_batch_sampler_uses_batch_counts() -> None:
         weights, len(sampler), replacement=True, generator=expected_generator
     ).tolist()
 
+    stats = sampler.get_sampling_statistics()
+    assert stats["dataset_indices"] == expected_dataset_indices
+
     batches = list(iter(sampler))
     assert len(batches) == len(expected_dataset_indices)
 
     dataset_offset = len(dataset_1)
     actual_dataset_indices = [0 if batch[0] < dataset_offset else 1 for batch in batches]
 
-    assert actual_dataset_indices == expected_dataset_indices
+    assert actual_dataset_indices == stats["dataset_indices"]
     assert actual_dataset_indices.count(0) > len(batch_sampler_1)
