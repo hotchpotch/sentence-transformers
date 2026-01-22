@@ -28,12 +28,14 @@ def _manual_bidirectional_loss_with_negatives(
     queries: torch.Tensor,
     positives: torch.Tensor,
     negatives: list[torch.Tensor],
+    exclude_hard_negatives_from_doc_doc: bool = True,
 ) -> torch.Tensor:
     # Manual InfoNCE with q->d, q->q (j!=i), d->q, d->d (j!=i) and hard negatives as extra docs.
-    docs = torch.cat([positives] + negatives, dim=0) if negatives else positives
-    sim_qd = util.dot_score(queries, docs)
+    docs_all = torch.cat([positives] + negatives, dim=0) if negatives else positives
+    docs_for_dd = positives if exclude_hard_negatives_from_doc_doc else docs_all
+    sim_qd = util.dot_score(queries, docs_all)
     sim_qq = util.dot_score(queries, queries)
-    sim_dd = util.dot_score(docs, docs)
+    sim_dd = util.dot_score(docs_for_dd, positives)
 
     losses = []
     for i in range(queries.size(0)):
@@ -108,16 +110,37 @@ def test_bidirectional_info_nce_manual_formula_with_hard_negatives():
         model=Mock(spec=SentenceTransformer),
         temperature=1.0,
         similarity_fct=util.dot_score,
+        exclude_hard_negatives_from_doc_doc=True,
     )
     queries = torch.tensor([[1.0, 0.5], [-0.3, 0.8]])
     positives = torch.tensor([[0.2, -0.1], [0.4, 0.6]])
     negatives = torch.tensor([[-0.5, 0.7], [0.1, -0.9]])
 
     computed = loss.compute_loss_from_embeddings([queries, positives, negatives], labels=None)
-    # Manual check (dot similarity, temperature=1.0, with hard negatives):
+    # Manual check (dot similarity, temperature=1.0, with hard negatives excluded from d->d by default):
     # L_i = -log( exp(s(q_i,d_i)) / Z_i ),
-    # with Z_i summing q->d (including hard negatives), q->q (j!=i), d->q, d->d (j!=i).
-    expected = _manual_bidirectional_loss_with_negatives(queries, positives, [negatives])
+    # with Z_i summing q->d (including hard negatives), q->q (j!=i), d->q, d->d (j!=i, positives only).
+    expected = _manual_bidirectional_loss_with_negatives(queries, positives, [negatives], True)
+
+    assert pytest.approx(computed.item(), rel=1e-6) == expected.item()
+
+
+def test_bidirectional_info_nce_manual_formula_with_hard_negatives_in_doc_doc():
+    loss = losses.MultipleNegativesBidirectionalRankingLoss(
+        model=Mock(spec=SentenceTransformer),
+        temperature=1.0,
+        similarity_fct=util.dot_score,
+        exclude_hard_negatives_from_doc_doc=False,
+    )
+    queries = torch.tensor([[1.0, 0.5], [-0.3, 0.8]])
+    positives = torch.tensor([[0.2, -0.1], [0.4, 0.6]])
+    negatives = torch.tensor([[-0.5, 0.7], [0.1, -0.9]])
+
+    computed = loss.compute_loss_from_embeddings([queries, positives, negatives], labels=None)
+    # Manual check (dot similarity, temperature=1.0, with hard negatives included in d->d):
+    # L_i = -log( exp(s(q_i,d_i)) / Z_i ),
+    # with Z_i summing q->d (including hard negatives), q->q (j!=i), d->q, d->d (j!=i, all docs).
+    expected = _manual_bidirectional_loss_with_negatives(queries, positives, [negatives], False)
 
     assert pytest.approx(computed.item(), rel=1e-6) == expected.item()
 
