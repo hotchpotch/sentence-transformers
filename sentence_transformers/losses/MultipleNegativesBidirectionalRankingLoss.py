@@ -18,6 +18,7 @@ class MultipleNegativesBidirectionalRankingLoss(nn.Module):
         temperature: float = 0.01,
         similarity_fct: callable[[Tensor, Tensor], Tensor] = util.cos_sim,
         gather_across_devices: bool = False,
+        exclude_hard_negatives_from_doc_doc: bool = True,
     ) -> None:
         """
         Improved contrastive loss that adds query-query and document-document negatives, inspired by the
@@ -46,6 +47,8 @@ class MultipleNegativesBidirectionalRankingLoss(nn.Module):
             gather_across_devices: If True, gather the embeddings across all devices before computing the loss.
                 Recommended when training on multiple GPUs, as it allows for larger batch sizes, but it may slow down
                 training due to communication overhead, and can potentially lead to out-of-memory errors.
+            exclude_hard_negatives_from_doc_doc: If True (default), hard negatives are excluded from the d->d term
+                (document-document negatives). This can improve performance in supervised setups with hard negatives.
 
         Requirements:
             1. (anchor, positive) pairs or (anchor, positive, negative) triplets
@@ -67,8 +70,10 @@ class MultipleNegativesBidirectionalRankingLoss(nn.Module):
               ensure that no in-batch negatives are duplicates of the anchor or positive samples.
 
         Notes:
-            - Optional negatives are treated as additional documents (hard negatives) and are included in the
-              query-document and document-document terms. They are not treated as queries.
+            - Optional negatives are treated as additional documents (hard negatives) for the query-document term and
+              are not treated as queries.
+            - By default, hard negatives are excluded from the document-document term. Set
+              ``exclude_hard_negatives_from_doc_doc=False`` to include them.
 
         Relations:
             - Like :class:`MultipleNegativesRankingLoss`, but with additional query-query and document-document
@@ -107,6 +112,7 @@ class MultipleNegativesBidirectionalRankingLoss(nn.Module):
             raise ValueError("temperature must be > 0.")
         self.temperature = temperature
         self.similarity_fct = similarity_fct
+        self.exclude_hard_negatives_from_doc_doc = exclude_hard_negatives_from_doc_doc
         self.gather_across_devices = gather_across_devices
 
     def forward(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor) -> Tensor:
@@ -135,16 +141,18 @@ class MultipleNegativesBidirectionalRankingLoss(nn.Module):
                 rank = torch.distributed.get_rank()
                 offset = rank * batch_size
 
-        docs = torch.cat(docs, dim=0)
+        docs_all = torch.cat(docs, dim=0)
+        docs_pos = docs[0]
         # (batch_size * world_size * (1 + num_negatives), embedding_dim)
         local_indices = torch.arange(offset, offset + batch_size, device=queries.device)
         local_queries = queries[local_indices]
-        local_docs = docs[local_indices]
+        local_docs = docs_pos[local_indices]
 
-        sim_qd = self.similarity_fct(local_queries, docs) * self.scale  # (bs, bs * ws * (1 + nn))
+        sim_qd = self.similarity_fct(local_queries, docs_all) * self.scale  # (bs, bs * ws * (1 + nn))
         sim_qq = self.similarity_fct(local_queries, queries) * self.scale  # (bs, bs * ws)
         sim_dq = (self.similarity_fct(queries, local_docs) * self.scale).T  # (bs, bs * ws)
-        sim_dd = (self.similarity_fct(docs, local_docs) * self.scale).T  # (bs, bs * ws * (1 + nn))
+        docs_for_dd = docs_pos if self.exclude_hard_negatives_from_doc_doc else docs_all
+        sim_dd = (self.similarity_fct(docs_for_dd, local_docs) * self.scale).T
 
         # Remove self-similarity entries q_i -> q_i and d_i -> d_i for local pairs
         row_indices = torch.arange(batch_size, device=queries.device)
@@ -162,6 +170,7 @@ class MultipleNegativesBidirectionalRankingLoss(nn.Module):
         return {
             "temperature": self.temperature,
             "similarity_fct": self.similarity_fct.__name__,
+            "exclude_hard_negatives_from_doc_doc": self.exclude_hard_negatives_from_doc_doc,
             "gather_across_devices": self.gather_across_devices,
         }
 

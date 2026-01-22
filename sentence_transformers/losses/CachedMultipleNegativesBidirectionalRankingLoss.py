@@ -52,6 +52,7 @@ class CachedMultipleNegativesBidirectionalRankingLoss(nn.Module):
         mini_batch_size: int = 32,
         gather_across_devices: bool = False,
         show_progress_bar: bool = False,
+        exclude_hard_negatives_from_doc_doc: bool = True,
     ) -> None:
         """
         Cached variant of :class:`MultipleNegativesBidirectionalRankingLoss` using GradCache.
@@ -73,6 +74,8 @@ class CachedMultipleNegativesBidirectionalRankingLoss(nn.Module):
                 Recommended when training on multiple GPUs, as it allows for larger batch sizes, but it may slow down
                 training due to communication overhead, and can potentially lead to out-of-memory errors.
             show_progress_bar: If True, a progress bar for the mini-batches is shown during training. The default is False.
+            exclude_hard_negatives_from_doc_doc: If True (default), hard negatives are excluded from the d->d term
+                (document-document negatives). This can improve performance in supervised setups with hard negatives.
 
         Requirements:
             1. (anchor, positive) pairs or (anchor, positive, negative) triplets
@@ -96,8 +99,10 @@ class CachedMultipleNegativesBidirectionalRankingLoss(nn.Module):
               ensure that no in-batch negatives are duplicates of the anchor or positive samples.
 
         Notes:
-            - Optional negatives are treated as additional documents (hard negatives) and are included in the
-              query-document and document-document terms. They are not treated as queries.
+            - Optional negatives are treated as additional documents (hard negatives) for the query-document term and
+              are not treated as queries.
+            - By default, hard negatives are excluded from the document-document term. Set
+              ``exclude_hard_negatives_from_doc_doc=False`` to include them.
 
         Relations:
             - Equivalent to :class:`MultipleNegativesBidirectionalRankingLoss`, but with caching that allows for much higher batch sizes
@@ -140,6 +145,7 @@ class CachedMultipleNegativesBidirectionalRankingLoss(nn.Module):
         self.temperature = temperature
         self.similarity_fct = similarity_fct
         self.mini_batch_size = mini_batch_size
+        self.exclude_hard_negatives_from_doc_doc = exclude_hard_negatives_from_doc_doc
         self.gather_across_devices = gather_across_devices
         self.show_progress_bar = show_progress_bar
 
@@ -224,7 +230,8 @@ class CachedMultipleNegativesBidirectionalRankingLoss(nn.Module):
                 rank = torch.distributed.get_rank()
                 offset = rank * batch_size
 
-        docs = torch.cat(docs, dim=0)
+        docs_all = torch.cat(docs, dim=0)
+        docs_pos = docs[0]
         local_indices = torch.arange(offset, offset + batch_size, device=queries.device)
 
         losses: list[torch.Tensor] = []
@@ -238,12 +245,13 @@ class CachedMultipleNegativesBidirectionalRankingLoss(nn.Module):
             end = min(begin + self.mini_batch_size, batch_size)
             local_batch = local_indices[begin:end]
             local_queries = queries[local_batch]
-            local_docs = docs[local_batch]
+            local_docs = docs_pos[local_batch]
 
-            sim_qd = self.similarity_fct(local_queries, docs) * self.scale  # (mbs, bs * ws * (1 + nn))
+            sim_qd = self.similarity_fct(local_queries, docs_all) * self.scale  # (mbs, bs * ws * (1 + nn))
             sim_qq = self.similarity_fct(local_queries, queries) * self.scale  # (mbs, bs * ws)
             sim_dq = (self.similarity_fct(queries, local_docs) * self.scale).T  # (mbs, bs * ws)
-            sim_dd = (self.similarity_fct(docs, local_docs) * self.scale).T  # (mbs, bs * ws * (1 + nn))
+            docs_for_dd = docs_pos if self.exclude_hard_negatives_from_doc_doc else docs_all
+            sim_dd = (self.similarity_fct(docs_for_dd, local_docs) * self.scale).T
 
             # Remove self-similarity entries q_i -> q_i and d_i -> d_i for local pairs
             row_indices = torch.arange(len(local_batch), device=queries.device)
@@ -295,6 +303,7 @@ class CachedMultipleNegativesBidirectionalRankingLoss(nn.Module):
             "temperature": self.temperature,
             "similarity_fct": self.similarity_fct.__name__,
             "mini_batch_size": self.mini_batch_size,
+            "exclude_hard_negatives_from_doc_doc": self.exclude_hard_negatives_from_doc_doc,
             "gather_across_devices": self.gather_across_devices,
         }
 
