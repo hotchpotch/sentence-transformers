@@ -20,6 +20,7 @@ class MultipleNegativesMaskedBidirectionalRankingLoss(nn.Module):
         margin: float | None = 0.1,
         hard_negative_margin: float | None = None,
         gather_across_devices: bool = False,
+        debug_mask_stats: bool = False,
     ) -> None:
         """
         Masked InfoNCE loss that uses three pools in the denominator: q->d, q->q, and d->d.
@@ -40,6 +41,7 @@ class MultipleNegativesMaskedBidirectionalRankingLoss(nn.Module):
             gather_across_devices: If True, gather the embeddings across all devices before computing the loss.
                 Recommended when training on multiple GPUs, as it allows for larger batch sizes, but it may slow down
                 training due to communication overhead, and can potentially lead to out-of-memory errors.
+            debug_mask_stats: If True, print temporary debug stats about how many candidates were masked.
 
         Requirements:
             1. (anchor, positive) pairs or (anchor, positive, negative) triplets
@@ -90,6 +92,7 @@ class MultipleNegativesMaskedBidirectionalRankingLoss(nn.Module):
         self.margin = margin
         self.hard_negative_margin = hard_negative_margin
         self.gather_across_devices = gather_across_devices
+        self.debug_mask_stats = debug_mask_stats
 
     def forward(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor) -> Tensor:
         sentence_features = list(sentence_features)
@@ -176,6 +179,25 @@ class MultipleNegativesMaskedBidirectionalRankingLoss(nn.Module):
         all_logits = torch.cat([cand.reshape(batch_size, -1) for cand in candidates], dim=1)
         log_z = torch.logsumexp(all_logits, dim=1)
         loss = -(pos_logits - log_z).mean()
+
+        if self.debug_mask_stats:
+            # TEMP DEBUG: mask statistics output. Remove when not needed.
+            total_qd = mask_offdiag.sum().item()
+            masked_qd = total_qd - mask_qd_pos.sum().item()
+            total_qq = mask_offdiag.sum().item()
+            masked_qq = total_qq - mask_qq.sum().item()
+            total_dd = mask_offdiag.sum().item()
+            masked_dd = total_dd - mask_dd.sum().item()
+            if total_hard is None:
+                total_hard = 0
+                masked_hard = 0
+            print(
+                "TEMP DEBUG mask stats: "
+                f"q->d {masked_qd}/{total_qd}, "
+                f"q->q {masked_qq}/{total_qq}, "
+                f"d->d {masked_dd}/{total_dd}, "
+                f"hard {masked_hard}/{total_hard}"
+            )
 
         return loss
 
