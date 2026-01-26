@@ -17,8 +17,8 @@ class MultipleNegativesMaskedBidirectionalRankingLoss(nn.Module):
         model: SentenceTransformer,
         temperature: float = 0.01,
         similarity_fct: callable[[Tensor, Tensor], Tensor] = util.cos_sim,
-        margin: float = 0.1,
-        hard_negative_margin: float = 0.1,
+        margin: float | None = 0.1,
+        hard_negative_margin: float | None = None,
         gather_across_devices: bool = False,
     ) -> None:
         """
@@ -35,7 +35,8 @@ class MultipleNegativesMaskedBidirectionalRankingLoss(nn.Module):
             similarity_fct: similarity function between sentence embeddings. By default, cos_sim. Can also be set to
                 dot product (and then set scale to 1)
             margin: Margin for masking in-batch candidates. Candidates with similarity > s_pos + margin are masked.
-            hard_negative_margin: Margin for masking hard negatives. A value <= 0 disables hard negative filtering.
+                If None, in-batch masking is disabled (except for diagonal exclusion).
+            hard_negative_margin: Margin for masking hard negatives. If None, hard negative filtering is disabled.
             gather_across_devices: If True, gather the embeddings across all devices before computing the loss.
                 Recommended when training on multiple GPUs, as it allows for larger batch sizes, but it may slow down
                 training due to communication overhead, and can potentially lead to out-of-memory errors.
@@ -125,31 +126,46 @@ class MultipleNegativesMaskedBidirectionalRankingLoss(nn.Module):
         sim_qd = self.similarity_fct(local_queries, docs_all)
         row_indices = torch.arange(batch_size, device=queries.device)
         pos_scores = sim_qd[row_indices, local_indices]
-        threshold = pos_scores[:, None] + self.margin
+        threshold = None if self.margin is None else pos_scores[:, None] + self.margin
 
         # Mask for off-diagonal entries (exclude self)
         mask_offdiag = torch.ones(batch_size, total_size, dtype=torch.bool, device=queries.device)
         mask_offdiag[row_indices, local_indices] = False
 
         sim_qd_pos = sim_qd[:, :total_size]
-        mask_qd_pos = mask_offdiag & (sim_qd_pos <= threshold)
+        if threshold is None:
+            mask_qd_pos = mask_offdiag
+        else:
+            mask_qd_pos = mask_offdiag & (sim_qd_pos <= threshold)
         qd_pos_logits = torch.where(mask_qd_pos, sim_qd_pos * self.scale, -torch.inf)
 
         hard_logits = None
+        masked_hard = None
+        total_hard = None
         if docs_neg:
             sim_qd_neg = sim_qd[:, total_size:]
-            if self.hard_negative_margin > 0:
+            if self.hard_negative_margin is None:
+                hard_logits = sim_qd_neg * self.scale
+                total_hard = sim_qd_neg.numel()
+                masked_hard = 0
+            else:
                 mask_qneg = sim_qd_neg <= (pos_scores[:, None] + self.hard_negative_margin)
                 hard_logits = torch.where(mask_qneg, sim_qd_neg * self.scale, -torch.inf)
-            else:
-                hard_logits = sim_qd_neg * self.scale
+                total_hard = sim_qd_neg.numel()
+                masked_hard = total_hard - mask_qneg.sum().item()
 
         sim_qq = self.similarity_fct(local_queries, queries)
-        mask_qq = mask_offdiag & (sim_qq <= threshold)
+        if threshold is None:
+            mask_qq = mask_offdiag
+        else:
+            mask_qq = mask_offdiag & (sim_qq <= threshold)
         qq_logits = torch.where(mask_qq, sim_qq * self.scale, -torch.inf)
 
         sim_dd = self.similarity_fct(local_docs, docs_pos)
-        mask_dd = mask_offdiag & (sim_dd <= threshold)
+        if threshold is None:
+            mask_dd = mask_offdiag
+        else:
+            mask_dd = mask_offdiag & (sim_dd <= threshold)
         dd_logits = torch.where(mask_dd, sim_dd * self.scale, -torch.inf)
 
         pos_logits = pos_scores * self.scale
@@ -160,6 +176,7 @@ class MultipleNegativesMaskedBidirectionalRankingLoss(nn.Module):
         all_logits = torch.cat([cand.reshape(batch_size, -1) for cand in candidates], dim=1)
         log_z = torch.logsumexp(all_logits, dim=1)
         loss = -(pos_logits - log_z).mean()
+
         return loss
 
     def get_config_dict(self) -> dict[str, Any]:
