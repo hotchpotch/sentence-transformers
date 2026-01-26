@@ -20,7 +20,7 @@ class MultipleNegativesMaskedBidirectionalRankingLoss(nn.Module):
         margin: float | None = 0.1,
         hard_negative_margin: float | None = None,
         gather_across_devices: bool = False,
-        debug_mask_stats: bool = False,
+        debug_mask_stats: int = 0,
     ) -> None:
         """
         Masked InfoNCE loss that uses three pools in the denominator: q->d, q->q, and d->d.
@@ -41,7 +41,8 @@ class MultipleNegativesMaskedBidirectionalRankingLoss(nn.Module):
             gather_across_devices: If True, gather the embeddings across all devices before computing the loss.
                 Recommended when training on multiple GPUs, as it allows for larger batch sizes, but it may slow down
                 training due to communication overhead, and can potentially lead to out-of-memory errors.
-            debug_mask_stats: If True, print temporary debug stats about how many candidates were masked.
+            debug_mask_stats: Print temporary debug stats about how many candidates were masked. Set to 0 to disable.
+                If > 0, stats are printed on the first call and every Nth call thereafter.
 
         Requirements:
             1. (anchor, positive) pairs or (anchor, positive, negative) triplets
@@ -92,7 +93,10 @@ class MultipleNegativesMaskedBidirectionalRankingLoss(nn.Module):
         self.margin = margin
         self.hard_negative_margin = hard_negative_margin
         self.gather_across_devices = gather_across_devices
+        if debug_mask_stats < 0:
+            raise ValueError("debug_mask_stats must be >= 0.")
         self.debug_mask_stats = debug_mask_stats
+        self._debug_step = 0
 
     def forward(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor) -> Tensor:
         sentence_features = list(sentence_features)
@@ -180,7 +184,12 @@ class MultipleNegativesMaskedBidirectionalRankingLoss(nn.Module):
         log_z = torch.logsumexp(all_logits, dim=1)
         loss = -(pos_logits - log_z).mean()
 
-        if self.debug_mask_stats:
+        self._debug_step += 1
+        emit_debug = self.debug_mask_stats > 0 and (
+            self._debug_step == 1 or self._debug_step % self.debug_mask_stats == 0
+        )
+
+        if emit_debug:
             # TEMP DEBUG: mask statistics output. Remove when not needed.
             total_qd = mask_offdiag.sum().item()
             masked_qd = total_qd - mask_qd_pos.sum().item()
