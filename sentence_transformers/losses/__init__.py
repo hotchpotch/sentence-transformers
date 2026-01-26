@@ -16,6 +16,9 @@ from .CachedGISTEmbedLoss import CachedGISTEmbedLoss
 from .CachedMultipleNegativesBidirectionalRankingLoss import (
     CachedMultipleNegativesBidirectionalRankingLoss,
 )
+from .CachedMultipleNegativesMaskedBidirectionalRankingLoss import (
+    CachedMultipleNegativesMaskedBidirectionalRankingLoss,
+)
 from .CachedMultipleNegativesRankingLoss import CachedMultipleNegativesRankingLoss
 from .CachedMultipleNegativesSymmetricRankingLoss import (
     CachedMultipleNegativesSymmetricRankingLoss,
@@ -36,6 +39,9 @@ from .MatryoshkaLoss import MatryoshkaLoss
 from .MegaBatchMarginLoss import MegaBatchMarginLoss
 from .MSELoss import MSELoss
 from .MultipleNegativesBidirectionalRankingLoss import MultipleNegativesBidirectionalRankingLoss
+from .MultipleNegativesMaskedBidirectionalRankingLoss import (
+    MultipleNegativesMaskedBidirectionalRankingLoss,
+)
 from .MultipleNegativesRankingLoss import MultipleNegativesRankingLoss
 from .MultipleNegativesSymmetricRankingLoss import MultipleNegativesSymmetricRankingLoss
 from .OnlineContrastiveLoss import OnlineContrastiveLoss
@@ -47,6 +53,7 @@ __all__ = [
     "CosineSimilarityLoss",
     "SoftmaxLoss",
     "MultipleNegativesBidirectionalRankingLoss",
+    "MultipleNegativesMaskedBidirectionalRankingLoss",
     "MultipleNegativesRankingLoss",
     "MultipleNegativesSymmetricRankingLoss",
     "TripletLoss",
@@ -59,6 +66,7 @@ __all__ = [
     "SiameseDistanceMetric",
     "CachedGISTEmbedLoss",
     "CachedMultipleNegativesBidirectionalRankingLoss",
+    "CachedMultipleNegativesMaskedBidirectionalRankingLoss",
     "CachedMultipleNegativesRankingLoss",
     "CachedMultipleNegativesSymmetricRankingLoss",
     "ContrastiveTensionLoss",
