@@ -265,10 +265,10 @@ class NoDuplicatesBatchSampler(DefaultBatchSampler):
                     "NoDuplicatesBatchSampler with precompute_hashes=True requires `xxhash`. "
                     "Install `xxhash` to use this option."
                 )
-            cpu_count = os.cpu_count() or 1
-            # Leave one core free to avoid saturating the system when hashing.
-            default_workers = max(1, min(8, cpu_count - 1))
             if self.precompute_num_proc is None:
+                cpu_count = os.cpu_count() or 1
+                # Leave one core free to avoid saturating the system when hashing.
+                default_workers = max(1, min(8, cpu_count - 1))
                 self.precompute_num_proc = default_workers
 
     def _build_hashes(self) -> None:
