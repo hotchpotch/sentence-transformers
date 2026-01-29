@@ -28,84 +28,6 @@ _XXHASH_INT64_MAX = 1 << 63
 _XXHASH_UINT64_MAX = 1 << 64
 
 
-def _xxhash_int64(value: str) -> int:
-    # Convert uint64 -> int64 to keep values compatible with Arrow int64 storage.
-    hashed = xxhash.xxh64_intdigest(value)
-    if hashed >= _XXHASH_INT64_MAX:
-        hashed -= _XXHASH_UINT64_MAX
-    return hashed
-
-
-def _hash_batch(
-    batch: dict[str, list[Any]],
-    columns: list[str],
-    exclude_columns: set[str],
-) -> dict[str, list[list[int]]]:
-    # Must be defined at module scope because datasets.map with num_proc pickles this function.
-    # Build per-row hash lists so we can later do fast overlap checks without re-reading the dataset.
-    active_columns = [column for column in columns if column not in exclude_columns]
-    batch_size = len(batch[active_columns[0]]) if active_columns else len(next(iter(batch.values()), []))
-    if not active_columns:
-        return {"__hashes": [[] for _ in range(batch_size)]}
-    hashes: list[list[int]] = []
-    for row_idx in range(batch_size):
-        row_hashes: list[int] = []
-        for column in active_columns:
-            value = batch[column][row_idx]
-            if isinstance(value, list):
-                for item in value:
-                    row_hashes.append(_xxhash_int64(str(item)))
-            else:
-                row_hashes.append(_xxhash_int64(str(value)))
-        hashes.append(row_hashes)
-    return {"__hashes": hashes}
-
-
-def _remove_label_columns(dataset: Dataset, valid_label_columns: list[str] | None) -> Dataset:
-    # Drop label columns so they don't participate in duplicate checks.
-    if label_columns := set(dataset.column_names) & set(valid_label_columns or []):
-        return dataset.remove_columns(list(label_columns))
-    return dataset
-
-
-def _has_overlap(sample_values, batch_values: set[Any]) -> bool:
-    # Avoid materializing a set if we already have one.
-    if isinstance(sample_values, set):
-        return bool(sample_values & batch_values)
-    return any(value in batch_values for value in sample_values)
-
-
-def _iter_no_duplicate_batches(
-    remaining_indices: dict[int, None],
-    get_sample_values,
-    batch_size: int,
-    drop_last: bool,
-) -> Iterator[list[int]]:
-    # Shared batch construction loop for both samplers; keeps behavior consistent.
-    while remaining_indices:
-        batch_values: set[Any] = set()
-        batch_indices: list[int] = []
-        for index in remaining_indices:
-            sample_values = get_sample_values(index)
-            if _has_overlap(sample_values, batch_values):
-                continue
-
-            batch_indices.append(index)
-            if len(batch_indices) == batch_size:
-                yield batch_indices
-                break
-
-            batch_values.update(sample_values)
-
-        else:
-            # NOTE: some indices might still have been ignored here
-            if not drop_last:
-                yield batch_indices
-
-        for index in batch_indices:
-            del remaining_indices[index]
-
-
 class SetEpochMixin:
     """
     Required for a BatchSampler as the Trainer will call set_epoch on the BatchSampler at the beginning of each epoch.
@@ -241,6 +163,38 @@ class GroupByLabelBatchSampler(DefaultBatchSampler):
             yield partial_batch
 
 
+def _xxhash_int64(value: str) -> int:
+    # Convert uint64 -> int64 to keep values compatible with Arrow int64 storage.
+    hashed = xxhash.xxh64_intdigest(value)
+    if hashed >= _XXHASH_INT64_MAX:
+        hashed -= _XXHASH_UINT64_MAX
+    return hashed
+
+
+def _hash_batch(
+    batch: dict[str, list[Any]],
+    columns: list[str],
+    exclude_columns: set[str],
+) -> dict[str, list[list[int]]]:
+    # Must be defined at module scope because datasets.map with num_proc pickles this function.
+    # Build per-row hash lists so we can later do fast overlap checks without re-reading the dataset.
+    active_columns = [column for column in columns if column not in exclude_columns]
+    batch_size = len(batch[active_columns[0]]) if active_columns else len(next(iter(batch.values()), []))
+    if not active_columns:
+        return {"__hashes": [[] for _ in range(batch_size)]}
+    hashes: list[list[int]] = []
+    for row_idx in range(batch_size):
+        row_hashes: list[int] = []
+        for column in active_columns:
+            value = batch[column][row_idx]
+            if isinstance(value, list):
+                row_hashes.extend(_xxhash_int64(str(item)) for item in value)
+            else:
+                row_hashes.append(_xxhash_int64(str(value)))
+        hashes.append(row_hashes)
+    return {"__hashes": hashes}
+
+
 class NoDuplicatesBatchSampler(DefaultBatchSampler):
     def __init__(
         self,
@@ -282,10 +236,13 @@ class NoDuplicatesBatchSampler(DefaultBatchSampler):
                 the indices.
             seed (int): Seed for the random number generator to ensure reproducibility. Defaults to 0.
             precompute_hashes (bool, optional): If True, precompute xxhash 64-bit values for dataset
-                fields using ``datasets.map`` to speed up duplicate checks. Requires ``xxhash`` and
-                uses additional memory. Defaults to False.
+                fields using ``datasets.map`` to speed up duplicate checks. Requires ``xxhash`` to
+                be installed and uses additional memory: in theory roughly
+                ``len(dataset) * num_columns * 8`` bytes for the dense int64 hash matrix,
+                although actual memory usage may therefore differ in practice. Defaults to False.
             precompute_num_proc (int, optional): Number of processes for hashing with ``datasets.map``.
-                Defaults to ``min(8, cpu_count - 1)`` when precomputing.
+                If set to ``None``, defaults to ``min(8, cpu_count - 1)`` when ``precompute_hashes``
+                is True.
             precompute_batch_size (int, optional): Batch size for ``datasets.map`` hashing.
                 Defaults to 1000.
         """
@@ -297,27 +254,29 @@ class NoDuplicatesBatchSampler(DefaultBatchSampler):
             generator=generator,
             seed=seed,
         )
-        self.dataset = _remove_label_columns(dataset, self.valid_label_columns)
+        if label_columns := set(dataset.column_names) & set(self.valid_label_columns or []):
+            dataset = dataset.remove_columns(list(label_columns))
+        self.dataset = dataset
         self.precompute_hashes = precompute_hashes
         self.precompute_num_proc = precompute_num_proc
         self.precompute_batch_size = precompute_batch_size
-        self._row_hashes: np.ndarray | list[list[int]] | None = None
+        self._row_hashes: np.ndarray | None = None
         if self.precompute_hashes:
             if xxhash is None:
                 raise ImportError(
                     "NoDuplicatesBatchSampler with precompute_hashes=True requires `xxhash`. "
                     "Install `xxhash` to use this option."
                 )
-            cpu_count = os.cpu_count() or 1
-            # Leave one core free to avoid saturating the system when hashing.
-            default_workers = max(1, min(8, cpu_count - 1))
             if self.precompute_num_proc is None:
+                cpu_count = os.cpu_count() or 1
+                # Leave one core free to avoid saturating the system when hashing.
+                default_workers = max(1, min(8, cpu_count - 1))
                 self.precompute_num_proc = default_workers
 
     def _build_hashes(self) -> None:
         if not self.precompute_hashes or self._row_hashes is not None:
             return
-        exclude_columns = set(self.valid_label_columns or []) | {"dataset_name"}
+        exclude_columns = {"dataset_name"}
         columns = list(self.dataset.column_names)
         # Precompute hash values once to avoid repeated string processing per batch.
         # Use num_proc to parallelize hashing across CPU cores.
@@ -378,14 +337,7 @@ class NoDuplicatesBatchSampler(DefaultBatchSampler):
 
         if self.precompute_hashes:
             self._build_hashes()
-            row_hashes = self._row_hashes if self._row_hashes is not None else []
-
-        # We create a dictionary to None because we need a data structure that:
-        # 1. Allows for cheap removal of elements
-        # 2. Preserves the order of elements, i.e. remains random
-        remaining_indices = dict.fromkeys(torch.randperm(len(self.dataset), generator=self.generator).tolist())
-
-        if self.precompute_hashes:
+            row_hashes: np.ndarray = self._row_hashes
 
             def get_sample_values(index: int):
                 return row_hashes[index]
@@ -395,12 +347,38 @@ class NoDuplicatesBatchSampler(DefaultBatchSampler):
             def get_sample_values(index: int) -> set[str]:
                 return {str(value) for key, value in self.dataset[index].items() if key != "dataset_name"}
 
-        yield from _iter_no_duplicate_batches(
-            remaining_indices,
-            get_sample_values,
-            self.batch_size,
-            self.drop_last,
-        )
+        def _has_overlap(sample_values, batch_values: set[Any]) -> bool:
+            # Avoid materializing a set if we already have one.
+            if isinstance(sample_values, set):
+                return not sample_values.isdisjoint(batch_values)
+            return any(value in batch_values for value in sample_values)
+
+        # We create a dictionary mapping indices to None because we need a data structure that:
+        # 1. Allows for cheap removal of elements
+        # 2. Preserves the order of elements, i.e. remains random
+        remaining_indices = dict.fromkeys(torch.randperm(len(self.dataset), generator=self.generator).tolist())
+        while remaining_indices:
+            batch_values: set[Any] = set()
+            batch_indices: list[int] = []
+            for index in remaining_indices:
+                sample_values = get_sample_values(index)
+                if _has_overlap(sample_values, batch_values):
+                    continue
+
+                batch_indices.append(index)
+                if len(batch_indices) == self.batch_size:
+                    yield batch_indices
+                    break
+
+                batch_values.update(sample_values)
+
+            else:
+                # NOTE: some indices might still have been ignored here
+                if not self.drop_last:
+                    yield batch_indices
+
+            for index in batch_indices:
+                del remaining_indices[index]
 
     def __len__(self) -> int:
         if self.drop_last:
