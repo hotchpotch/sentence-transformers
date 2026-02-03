@@ -52,6 +52,9 @@ class MultipleNegativesRankingLoss(nn.Module):
         ``directions`` and ``partition_mode`` values. Optional negatives in the input are treated as
         additional hard-negative documents for the corresponding query.
 
+        The default configuration is also known as the InfoNCE loss, SimCSE loss, cross-entropy loss with in-batch
+        negatives, or simply in-batch negatives loss.
+
         Args:
             model: SentenceTransformer model
             scale: Output of similarity function is multiplied by scale value. In some literature, the scaling parameter
