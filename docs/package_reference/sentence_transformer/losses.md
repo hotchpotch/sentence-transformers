@@ -144,18 +144,6 @@ This allows our network to be fine-tuned to recognize the similarity of sentence
 .. autoclass:: sentence_transformers.losses.CachedMultipleNegativesRankingLoss
 ```
 
-## MultipleNegativesBidirectionalRankingLoss
-
-```{eval-rst}
-.. autoclass:: sentence_transformers.losses.MultipleNegativesBidirectionalRankingLoss
-```
-
-## CachedMultipleNegativesBidirectionalRankingLoss
-
-```{eval-rst}
-.. autoclass:: sentence_transformers.losses.CachedMultipleNegativesBidirectionalRankingLoss
-```
-
 ## MultipleNegativesSymmetricRankingLoss
 
 ```{eval-rst}
