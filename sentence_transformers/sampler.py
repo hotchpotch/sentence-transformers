@@ -296,7 +296,7 @@ class NoDuplicatesBatchSampler(DefaultBatchSampler):
 
             row_count = len(column)
             if row_count == 0:
-                row_hashes = np.zeros((0, 0), dtype=np.int64)
+                row_hashes: np.ndarray = np.zeros((0, 0), dtype=np.int64)
             else:
                 offsets = column.offsets.to_numpy(zero_copy_only=False)
                 row_size = int(offsets[1] - offsets[0])
@@ -326,17 +326,17 @@ class NoDuplicatesBatchSampler(DefaultBatchSampler):
             self._build_hashes()
             row_hashes: np.ndarray = self._row_hashes
 
-            def get_sample_values(index: int) -> np.ndarray:
+            def get_sample_values(index: int) -> set[str] | np.ndarray:
                 return row_hashes[index]
 
         else:
 
-            def get_sample_values(index: int) -> set[str]:
+            def get_sample_values(index: int) -> set[str] | np.ndarray:
                 return {
                     str(value) for key, value in self.dataset[index].items() if key not in _EXCLUDE_DATASET_COLUMNS
                 }
 
-        def _has_overlap(sample_values: set[str] | np.ndarray, batch_values: set[Any]) -> bool:
+        def _has_overlap(sample_values: set[str] | np.ndarray, batch_values: set[str | np.int64]) -> bool:
             # Avoid materializing a set if we already have one.
             if isinstance(sample_values, set):
                 return not sample_values.isdisjoint(batch_values)
@@ -362,7 +362,7 @@ class NoDuplicatesBatchSampler(DefaultBatchSampler):
         head_position = 0
 
         while head_position != -1:
-            batch_values: set[Any] = set()
+            batch_values: set[str | np.int64] = set()
             batch_indices: list[int] = []
             current_position = head_position
             previous_position = -1
