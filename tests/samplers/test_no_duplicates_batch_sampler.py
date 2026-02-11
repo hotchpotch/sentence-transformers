@@ -242,6 +242,40 @@ def test_no_duplicates_batch_sampler_precomputed_hashes_are_int64(dummy_dataset:
     assert sampler._row_hashes.dtype == np.int64
 
 
+def test_no_duplicates_batch_sampler_list_values_match_between_hash_and_non_hash() -> None:
+    if sampler_module.xxhash is None:
+        pytest.skip("xxhash not installed")
+
+    dataset = Dataset.from_list(
+        [
+            {"anchor": ["a", "b"], "positive": "p0"},
+            {"anchor": ["c", "d"], "positive": "a"},
+        ]
+    )
+
+    sampler_kwargs = {
+        "dataset": dataset,
+        "batch_size": 2,
+        "drop_last": False,
+        "generator": torch.Generator(),
+        "seed": 1337,
+    }
+    default_sampler = NoDuplicatesBatchSampler(**sampler_kwargs)
+    hashed_sampler = NoDuplicatesBatchSampler(
+        **sampler_kwargs,
+        precompute_hashes=True,
+        precompute_num_proc=1,
+        precompute_batch_size=2,
+    )
+
+    default_batches = list(iter(default_sampler))
+    hashed_batches = list(iter(hashed_sampler))
+
+    assert hashed_batches == default_batches
+    assert len(default_batches) == 1
+    assert len(default_batches[0]) == 2
+
+
 def test_no_duplicates_batch_sampler_uses_int64_indices_when_int32_range_is_exceeded(
     dummy_dataset: Dataset, monkeypatch: pytest.MonkeyPatch
 ) -> None:

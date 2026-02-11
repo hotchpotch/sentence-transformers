@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 _XXHASH_INT64_MAX = 1 << 63
 _XXHASH_UINT64_MAX = 1 << 64
+_EXCLUDE_DATASET_COLUMNS = {"dataset_name"}
 
 
 class SetEpochMixin:
@@ -187,10 +188,8 @@ def _hash_batch(
         row_hashes: list[int] = []
         for column in active_columns:
             value = batch[column][row_idx]
-            if isinstance(value, list):
-                row_hashes.extend(_xxhash_int64(str(item)) for item in value)
-            else:
-                row_hashes.append(_xxhash_int64(str(value)))
+            # Match non-hash path semantics by hashing the stringified column value as-is.
+            row_hashes.append(_xxhash_int64(str(value)))
         hashes.append(row_hashes)
     return {"__hashes": hashes}
 
@@ -274,23 +273,21 @@ class NoDuplicatesBatchSampler(DefaultBatchSampler):
     def _build_hashes(self) -> None:
         if not self.precompute_hashes or self._row_hashes is not None:
             return
-        exclude_columns = {"dataset_name"}
         columns = list(self.dataset.column_names)
         # Precompute hash values once to avoid repeated string processing per batch.
         # Use num_proc to parallelize hashing across CPU cores.
-        hash_ds: Dataset | None = None
         hash_ds = self.dataset.map(
             _hash_batch,
             batched=True,
             batch_size=self.precompute_batch_size,
             num_proc=self.precompute_num_proc,
             remove_columns=columns,
-            fn_kwargs={"columns": columns, "exclude_columns": exclude_columns},
+            fn_kwargs={"columns": columns, "exclude_columns": _EXCLUDE_DATASET_COLUMNS},
             desc="Hashing dataset values",
         )
-        try:
-            import pyarrow as pa
+        import pyarrow as pa
 
+        try:
             column = hash_ds.data.column("__hashes")
             if isinstance(column, pa.ChunkedArray):
                 column = column.combine_chunks()
@@ -310,19 +307,11 @@ class NoDuplicatesBatchSampler(DefaultBatchSampler):
                 if values.size != row_count * row_size:
                     raise ValueError("Unexpected hashed value buffer size.")
                 row_hashes = values.reshape((row_count, row_size))
-        except Exception as exc:
-            # Surface failures explicitly; the precompute option expects fixed-length rows.
-            if hash_ds is not None:
-                del hash_ds
-            raise ValueError(
-                "NoDuplicatesBatchSampler with precompute_hashes=True requires fixed-length hash rows. "
-                "Ensure each sample has the same number of values across columns."
-            ) from exc
+        finally:
+            # Drop the temporary dataset to release Arrow buffers promptly.
+            del hash_ds
 
         self._row_hashes = row_hashes
-        # Drop the temporary dataset to release Arrow buffers promptly.
-        if hash_ds is not None:
-            del hash_ds
 
     def __iter__(self) -> Iterator[list[int]]:
         """
@@ -337,15 +326,17 @@ class NoDuplicatesBatchSampler(DefaultBatchSampler):
             self._build_hashes()
             row_hashes: np.ndarray = self._row_hashes
 
-            def get_sample_values(index: int):
+            def get_sample_values(index: int) -> np.ndarray:
                 return row_hashes[index]
 
         else:
 
             def get_sample_values(index: int) -> set[str]:
-                return {str(value) for key, value in self.dataset[index].items() if key != "dataset_name"}
+                return {
+                    str(value) for key, value in self.dataset[index].items() if key not in _EXCLUDE_DATASET_COLUMNS
+                }
 
-        def _has_overlap(sample_values, batch_values: set[Any]) -> bool:
+        def _has_overlap(sample_values: set[str] | np.ndarray, batch_values: set[Any]) -> bool:
             # Avoid materializing a set if we already have one.
             if isinstance(sample_values, set):
                 return not sample_values.isdisjoint(batch_values)
