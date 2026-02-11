@@ -13,12 +13,6 @@ from .BatchHardTripletLoss import (
 )
 from .BatchSemiHardTripletLoss import BatchSemiHardTripletLoss
 from .CachedGISTEmbedLoss import CachedGISTEmbedLoss
-from .CachedMultipleNegativesBidirectionalRankingLoss import (
-    CachedMultipleNegativesBidirectionalRankingLoss,
-)
-from .CachedMultipleNegativesMaskedBidirectionalRankingLoss import (
-    CachedMultipleNegativesMaskedBidirectionalRankingLoss,
-)
 from .CachedMultipleNegativesRankingLoss import CachedMultipleNegativesRankingLoss
 from .CachedMultipleNegativesSymmetricRankingLoss import (
     CachedMultipleNegativesSymmetricRankingLoss,
@@ -33,15 +27,12 @@ from .CosineSimilarityLoss import CosineSimilarityLoss
 from .DenoisingAutoEncoderLoss import DenoisingAutoEncoderLoss
 from .DistillKLDivLoss import DistillKLDivLoss
 from .GISTEmbedLoss import GISTEmbedLoss
+from .GlobalOrthogonalRegularizationLoss import GlobalOrthogonalRegularizationLoss
 from .MarginMSELoss import MarginMSELoss
 from .Matryoshka2dLoss import Matryoshka2dLoss
 from .MatryoshkaLoss import MatryoshkaLoss
 from .MegaBatchMarginLoss import MegaBatchMarginLoss
 from .MSELoss import MSELoss
-from .MultipleNegativesBidirectionalRankingLoss import MultipleNegativesBidirectionalRankingLoss
-from .MultipleNegativesMaskedBidirectionalRankingLoss import (
-    MultipleNegativesMaskedBidirectionalRankingLoss,
-)
 from .MultipleNegativesRankingLoss import MultipleNegativesRankingLoss
 from .MultipleNegativesSymmetricRankingLoss import MultipleNegativesSymmetricRankingLoss
 from .OnlineContrastiveLoss import OnlineContrastiveLoss
@@ -52,8 +43,6 @@ __all__ = [
     "AdaptiveLayerLoss",
     "CosineSimilarityLoss",
     "SoftmaxLoss",
-    "MultipleNegativesBidirectionalRankingLoss",
-    "MultipleNegativesMaskedBidirectionalRankingLoss",
     "MultipleNegativesRankingLoss",
     "MultipleNegativesSymmetricRankingLoss",
     "TripletLoss",
@@ -65,8 +54,6 @@ __all__ = [
     "ContrastiveLoss",
     "SiameseDistanceMetric",
     "CachedGISTEmbedLoss",
-    "CachedMultipleNegativesBidirectionalRankingLoss",
-    "CachedMultipleNegativesMaskedBidirectionalRankingLoss",
     "CachedMultipleNegativesRankingLoss",
     "CachedMultipleNegativesSymmetricRankingLoss",
     "ContrastiveTensionLoss",
@@ -78,6 +65,7 @@ __all__ = [
     "MegaBatchMarginLoss",
     "DenoisingAutoEncoderLoss",
     "GISTEmbedLoss",
+    "GlobalOrthogonalRegularizationLoss",
     "BatchHardTripletLoss",
     "BatchHardTripletLossDistanceFunction",
     "BatchHardSoftMarginTripletLoss",

@@ -5,7 +5,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Union
 
+from packaging.version import parse as parse_version
 from transformers import TrainingArguments as TransformersTrainingArguments
+from transformers import __version__ as transformers_version
 from transformers.training_args import ParallelMode
 from transformers.utils import ExplicitEnum
 
@@ -33,8 +35,6 @@ class BatchSamplers(ExplicitEnum):
 
         - :class:`~sentence_transformers.losses.MultipleNegativesRankingLoss`
         - :class:`~sentence_transformers.losses.CachedMultipleNegativesRankingLoss`
-        - :class:`~sentence_transformers.losses.MultipleNegativesBidirectionalRankingLoss`
-        - :class:`~sentence_transformers.losses.CachedMultipleNegativesBidirectionalRankingLoss`
         - :class:`~sentence_transformers.losses.MultipleNegativesSymmetricRankingLoss`
         - :class:`~sentence_transformers.losses.CachedMultipleNegativesSymmetricRankingLoss`
         - :class:`~sentence_transformers.losses.MegaBatchMarginLoss`
@@ -104,9 +104,6 @@ class MultiDatasetBatchSamplers(ExplicitEnum):
     - ``MultiDatasetBatchSamplers.PROPORTIONAL``: **[default]** Uses :class:`~sentence_transformers.sampler.ProportionalBatchSampler`,
       which samples from each dataset in proportion to its size.
       With this strategy, all samples from each dataset are used and larger datasets are sampled from more frequently.
-    - ``MultiDatasetBatchSamplers.SMOOTH_PROPORTIONAL``: Uses :class:`~sentence_transformers.sampler.SmoothProportionalBatchSampler`,
-      which samples from each dataset in proportion to its batch count raised to ``alpha`` (default: 0.5).
-      With this strategy, datasets are sampled more smoothly and datasets may be re-sampled within an epoch.
 
     If you want to use a custom multi-dataset batch sampler, then you can subclass
     :class:`~sentence_transformers.sampler.MultiDatasetDefaultBatchSampler` and pass the class (not an instance) to the
@@ -162,7 +159,6 @@ class MultiDatasetBatchSamplers(ExplicitEnum):
 
     ROUND_ROBIN = "round_robin"  # Round-robin sampling from each dataset
     PROPORTIONAL = "proportional"  # Sample from each dataset in proportion to its size [default]
-    SMOOTH_PROPORTIONAL = "smooth_proportional"  # Sample from each dataset in proportion to its batch count^alpha
 
 
 @dataclass
@@ -255,8 +251,43 @@ class SentenceTransformerTrainingArguments(TransformersTrainingArguments):
             r"{'SparseStaticEmbedding\.*': 1e-3} for the SparseStaticEmbedding module."
         },
     )
+    # Explicitly add warmup_ratio as transformers will remove it in the future, and I'd like to keep it until Sentence
+    # Transformers drops support for transformers v4. The default mirrors that of transformers, regardless of version.
+    warmup_ratio: float | None = field(
+        default_factory=lambda: None if parse_version(transformers_version) >= parse_version("5.0.0") else 0.0,
+        metadata={
+            "help": "This argument is deprecated and will be removed in the future. If you're on Transformers v5+, "
+            "then you should use `warmup_steps` instead as it also works with float values."
+        },
+    )
 
     def __post_init__(self):
+        # Handle compatibility for warmup arguments across different transformers versions. Transformers v5+ only
+        # supports warmup_steps (which can be an int or a float ratio) and removes warmup_ratio, while older versions
+        # only support warmup_ratio and warmup_steps as an int number of steps. The logic here ensures that users can
+        # use either argument across transformers versions, until we drop support for transformers <v5, at which point
+        # users should only use warmup_steps.
+        if parse_version(transformers_version) >= parse_version("5.0.0"):
+            # For transformers >= 5: if the user provided a warmup_ratio but did not
+            # explicitly set warmup_steps, treat warmup_ratio as the ratio and store
+            # it in warmup_steps (which now accepts floats).
+            if self.warmup_ratio is not None and self.warmup_steps == 0:
+                self.warmup_steps = self.warmup_ratio
+                self.warmup_ratio = None  # Reset to default
+
+                logger.warning(
+                    "The `warmup_ratio` argument is deprecated in Transformers v5+, and will also be removed from "
+                    "Sentence Transformers once support for Transformers v4 is dropped. Since you're using "
+                    "Transformers v5+, please use `warmup_steps` (as a float) to specify the warmup ratio instead."
+                )
+        else:
+            # For transformers < 5: allow users to pass a float in warmup_steps to
+            # denote a warmup ratio (0 < ratio < 1) and convert it into warmup_ratio.
+            # NOTE: For transformers v4, warmup_ratio defaults to 0.0, while in v5 it defaults to None.
+            if isinstance(self.warmup_steps, float) and 0.0 < self.warmup_steps < 1.0 and self.warmup_ratio == 0.0:
+                self.warmup_ratio = self.warmup_steps
+                self.warmup_steps = 0  # Set to default
+
         super().__post_init__()
 
         self.batch_sampler = (

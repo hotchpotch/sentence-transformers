@@ -52,6 +52,9 @@ class MultipleNegativesRankingLoss(nn.Module):
         ``directions`` and ``partition_mode`` values. Optional negatives in the input are treated as
         additional hard-negative documents for the corresponding query.
 
+        The default configuration is also known as the InfoNCE loss, SimCSE loss, cross-entropy loss with in-batch
+        negatives, or simply in-batch negatives loss.
+
         Args:
             model: SentenceTransformer model
             scale: Output of similarity function is multiplied by scale value. In some literature, the scaling parameter
@@ -106,10 +109,10 @@ class MultipleNegativesRankingLoss(nn.Module):
                 loss = MultipleNegativesRankingLoss(
                     model,
                     directions=("query_to_doc",),  # default
-                    partition_mode="joint",
+                    partition_mode="joint",  # default
                 )
 
-              This variant is recommended if train with (anchor, positive, negative_1, ..., negative_n) n-tuples.
+              This variant is recommended if you are training with (anchor, positive, negative_1, ..., negative_n) n-tuples.
 
             - Symmetric InfoNCE (query -> doc and doc -> query), e.g. as in `Günther et al. 2024 <https://arxiv.org/abs/2310.19923>`_::
 
@@ -129,7 +132,7 @@ class MultipleNegativesRankingLoss(nn.Module):
                     partition_mode="joint",  # single softmax over all selected interaction terms
                 )
 
-              This variant is recommended if training with only (anchor, positive) pairs or (anchor, positive, negative)
+              This variant is recommended if you are training with only (anchor, positive) pairs or (anchor, positive, negative)
               triplets, as it may provide a stronger training signal.
 
         Example:
@@ -259,3 +262,44 @@ class MultipleNegativesRankingLoss(nn.Module):
     @property
     def temperature(self) -> float:
         return 1.0 / self.scale
+
+    @property
+    def citation(self) -> str:
+        if (
+            set(self.directions) == {"query_to_doc", "query_to_query", "doc_to_query", "doc_to_doc"}
+            and self.partition_mode == "joint"
+        ):
+            return """
+@misc{li2023generaltextembeddingsmultistage,
+      title={Towards General Text Embeddings with Multi-stage Contrastive Learning},
+      author={Zehan Li and Xin Zhang and Yanzhao Zhang and Dingkun Long and Pengjun Xie and Meishan Zhang},
+      year={2023},
+      eprint={2308.03281},
+      archivePrefix={arXiv},
+      primaryClass={cs.CL},
+      url={https://arxiv.org/abs/2308.03281},
+}
+"""
+        if set(self.directions) == {"query_to_doc", "doc_to_query"} and self.partition_mode == "per_direction":
+            return """
+@misc{günther2024jinaembeddings28192token,
+      title={Jina Embeddings 2: 8192-Token General-Purpose Text Embeddings for Long Documents},
+      author={Michael Günther and Jackmin Ong and Isabelle Mohr and Alaeddine Abdessalem and Tanguy Abel and Mohammad Kalim Akram and Susana Guzman and Georgios Mastrapas and Saba Sturua and Bo Wang and Maximilian Werk and Nan Wang and Han Xiao},
+      year={2024},
+      eprint={2310.19923},
+      archivePrefix={arXiv},
+      primaryClass={cs.CL},
+      url={https://arxiv.org/abs/2310.19923},
+}
+"""
+        return """
+@misc{oord2019representationlearningcontrastivepredictive,
+      title={Representation Learning with Contrastive Predictive Coding},
+      author={Aaron van den Oord and Yazhe Li and Oriol Vinyals},
+      year={2019},
+      eprint={1807.03748},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG},
+      url={https://arxiv.org/abs/1807.03748},
+}
+"""
