@@ -9,6 +9,7 @@ import numpy as np
 from scipy.stats import pearsonr, spearmanr
 
 from sentence_transformers.evaluation.SentenceEvaluator import SentenceEvaluator
+from sentence_transformers.quantization import quantize_embeddings
 from sentence_transformers.readers import InputExample
 from sentence_transformers.similarity_functions import SimilarityFunction
 from sentence_transformers.util import (
@@ -92,6 +93,11 @@ class EmbeddingSimilarityEvaluator(SentenceEvaluator):
         write_csv: bool = True,
         precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] | None = None,
         truncate_dim: int | None = None,
+        quantization_eval_mode: Literal["legacy", "evaluator"] = "legacy",
+        quantization_calibration_size: int | None = 1024,
+        quantization_ranges: np.ndarray | None = None,
+        quantization_dequantize: bool = True,
+        binary_reconstruction: Literal["zero_one", "minus_one_one"] = "zero_one",
     ):
         super().__init__()
         self.sentences1 = sentences1
@@ -100,6 +106,11 @@ class EmbeddingSimilarityEvaluator(SentenceEvaluator):
         self.write_csv = write_csv
         self.precision = precision
         self.truncate_dim = truncate_dim
+        self.quantization_eval_mode = quantization_eval_mode
+        self.quantization_calibration_size = quantization_calibration_size
+        self.quantization_ranges = quantization_ranges
+        self.quantization_dequantize = quantization_dequantize
+        self.binary_reconstruction = binary_reconstruction
 
         assert len(self.sentences1) == len(self.sentences2)
         assert len(self.sentences1) == len(self.scores)
@@ -165,25 +176,16 @@ class EmbeddingSimilarityEvaluator(SentenceEvaluator):
 
         logger.info(f"EmbeddingSimilarityEvaluator: Evaluating the model on the {self.name} dataset{out_txt}:")
 
+        quantization_ranges = self._compute_quantization_ranges(model)
         embeddings1 = self.embed_inputs(model, self.sentences1)
         embeddings2 = self.embed_inputs(model, self.sentences2)
-        # Binary and ubinary embeddings are packed, so we need to unpack them for the distance metrics
-        if self.precision == "binary":
-            embeddings1 = (embeddings1 + 128).astype(np.uint8)
-            embeddings2 = (embeddings2 + 128).astype(np.uint8)
-        if self.precision in ("ubinary", "binary"):
-            embeddings1 = np.unpackbits(embeddings1, axis=1)
-            embeddings2 = np.unpackbits(embeddings2, axis=1)
 
-        # Convert quantized embeddings to float32 for similarity computations
-        # int8/uint8 need to be converted, and binary/ubinary are already converted via unpackbits
-        if self.precision in ("int8", "uint8"):
-            embeddings1 = embeddings1.astype(np.float32)
-            embeddings2 = embeddings2.astype(np.float32)
-        elif self.precision in ("binary", "ubinary"):
-            # After unpacking, convert from uint8 to float32
-            embeddings1 = embeddings1.astype(np.float32)
-            embeddings2 = embeddings2.astype(np.float32)
+        if self._use_evaluator_quantization:
+            embeddings1 = self._quantize_and_convert(embeddings1, ranges=quantization_ranges)
+            embeddings2 = self._quantize_and_convert(embeddings2, ranges=quantization_ranges)
+        else:
+            embeddings1 = self._convert_to_float(embeddings1)
+            embeddings2 = self._convert_to_float(embeddings2)
 
         labels = self.scores
 
@@ -258,16 +260,81 @@ class EmbeddingSimilarityEvaluator(SentenceEvaluator):
         sentences: str | list[str] | np.ndarray,
         **kwargs,
     ) -> np.ndarray:
+        precision = self.precision
+        if self._use_evaluator_quantization:
+            precision = "float32"
+
         return model.encode(
             sentences,
             batch_size=self.batch_size,
             show_progress_bar=self.show_progress_bar,
             convert_to_numpy=True,
-            precision=self.precision,
+            precision=precision,
             normalize_embeddings=bool(self.precision),
             truncate_dim=self.truncate_dim,
             **kwargs,
         )
+
+    @property
+    def _use_evaluator_quantization(self) -> bool:
+        return self.quantization_eval_mode == "evaluator" and self.precision not in (None, "float32")
+
+    def _compute_quantization_ranges(self, model: SentenceTransformer) -> np.ndarray | None:
+        if not self._use_evaluator_quantization or self.precision not in ("int8", "uint8"):
+            return None
+
+        if self.quantization_ranges is not None:
+            return self.quantization_ranges
+
+        sample_size = self.quantization_calibration_size
+        if sample_size == 0:
+            return None
+
+        calibration_sentences1 = self.sentences1
+        calibration_sentences2 = self.sentences2
+        if sample_size is not None and sample_size > 0:
+            calibration_sentences1 = calibration_sentences1[: min(sample_size, len(calibration_sentences1))]
+            calibration_sentences2 = calibration_sentences2[: min(sample_size, len(calibration_sentences2))]
+
+        calibration_sentences = calibration_sentences1 + calibration_sentences2
+        if not calibration_sentences:
+            return None
+
+        calibration_embeddings = self.embed_inputs(model, calibration_sentences)
+        return np.vstack((np.min(calibration_embeddings, axis=0), np.max(calibration_embeddings, axis=0)))
+
+    def _quantize_and_convert(self, embeddings: np.ndarray, ranges: np.ndarray | None = None) -> np.ndarray:
+        quantized_embeddings = quantize_embeddings(embeddings, precision=self.precision, ranges=ranges)
+        return self._convert_to_float(quantized_embeddings, ranges=ranges)
+
+    def _convert_to_float(self, embeddings: np.ndarray, ranges: np.ndarray | None = None) -> np.ndarray:
+        if self.precision is None or self.precision == "float32":
+            return embeddings
+
+        if self.precision == "binary":
+            embeddings = (embeddings + 128).astype(np.uint8)
+            embeddings = np.unpackbits(embeddings, axis=1).astype(np.float32)
+            if self.binary_reconstruction == "minus_one_one":
+                embeddings = embeddings * 2 - 1
+            return embeddings
+
+        if self.precision == "ubinary":
+            embeddings = np.unpackbits(embeddings, axis=1).astype(np.float32)
+            if self.binary_reconstruction == "minus_one_one":
+                embeddings = embeddings * 2 - 1
+            return embeddings
+
+        if self.precision in ("int8", "uint8"):
+            if self.quantization_dequantize and ranges is not None:
+                starts = ranges[0, :]
+                steps = (ranges[1, :] - ranges[0, :]) / 255.0
+                steps = np.clip(steps, 1e-12, None)
+                if self.precision == "int8":
+                    return (embeddings.astype(np.float32) + 128.0) * steps + starts
+                return embeddings.astype(np.float32) * steps + starts
+            return embeddings.astype(np.float32)
+
+        return embeddings
 
     @property
     def description(self) -> str:
@@ -275,7 +342,14 @@ class EmbeddingSimilarityEvaluator(SentenceEvaluator):
 
     def get_config_dict(self):
         config_dict = {}
-        config_dict_candidate_keys = ["truncate_dim", "precision"]
+        config_dict_candidate_keys = [
+            "truncate_dim",
+            "precision",
+            "quantization_eval_mode",
+            "quantization_calibration_size",
+            "quantization_dequantize",
+            "binary_reconstruction",
+        ]
         for key in config_dict_candidate_keys:
             if getattr(self, key) is not None:
                 config_dict[key] = getattr(self, key)

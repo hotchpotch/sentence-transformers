@@ -5,7 +5,7 @@ import json
 import logging
 import os
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 import torch
@@ -13,6 +13,7 @@ from torch import Tensor
 from tqdm import trange
 
 from sentence_transformers.evaluation.SentenceEvaluator import SentenceEvaluator
+from sentence_transformers.quantization import quantize_embeddings
 from sentence_transformers.similarity_functions import SimilarityFunction
 
 if TYPE_CHECKING:
@@ -148,6 +149,11 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
         corpus_prompt_name: str | None = None,
         write_predictions: bool = False,
         precision: str | None = None,
+        quantization_eval_mode: Literal["legacy", "evaluator"] = "legacy",
+        quantization_calibration_size: int | None = 1024,
+        quantization_ranges: np.ndarray | None = None,
+        quantization_dequantize: bool = True,
+        binary_reconstruction: Literal["zero_one", "minus_one_one"] = "zero_one",
     ) -> None:
         super().__init__()
         self.queries_ids = []
@@ -182,6 +188,11 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
         self.main_score_function = SimilarityFunction(main_score_function) if main_score_function else None
         self.truncate_dim = truncate_dim
         self.precision = precision
+        self.quantization_eval_mode = quantization_eval_mode
+        self.quantization_calibration_size = quantization_calibration_size
+        self.quantization_ranges = quantization_ranges
+        self.quantization_dequantize = quantization_dequantize
+        self.binary_reconstruction = binary_reconstruction
 
         if name:
             name = "_" + name
@@ -213,6 +224,10 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
 
             for k in self.map_at_k:
                 self.csv_headers.append(f"{score_name}-MAP@{k}")
+
+    @property
+    def _use_evaluator_quantization(self) -> bool:
+        return self.quantization_eval_mode == "evaluator" and self.precision not in (None, "float32")
 
     def __call__(
         self,
@@ -317,6 +332,7 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
         )
 
         # Compute embedding for the queries
+        quantization_ranges = self._compute_quantization_ranges(model=model, corpus_model=corpus_model)
         query_embeddings = self.embed_inputs(
             model,
             self.queries,
@@ -325,8 +341,11 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
             prompt=self.query_prompt,
         )
 
-        # Convert quantized embeddings to float32 for similarity computations
-        query_embeddings = self._convert_to_float(query_embeddings)
+        if self._use_evaluator_quantization:
+            query_embeddings = self._quantize_and_convert(query_embeddings, ranges=quantization_ranges)
+        else:
+            # Convert quantized embeddings to float32 for similarity computations
+            query_embeddings = self._convert_to_float(query_embeddings)
 
         queries_result_list = {}
         for name in self.score_functions:
@@ -349,8 +368,11 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
                 )
             else:
                 sub_corpus_embeddings = corpus_embeddings[corpus_start_idx:corpus_end_idx]
-            # Convert quantized embeddings to float32 for similarity computations
-            sub_corpus_embeddings = self._convert_to_float(sub_corpus_embeddings)
+            if self._use_evaluator_quantization:
+                sub_corpus_embeddings = self._quantize_and_convert(sub_corpus_embeddings, ranges=quantization_ranges)
+            else:
+                # Convert quantized embeddings to float32 for similarity computations
+                sub_corpus_embeddings = self._convert_to_float(sub_corpus_embeddings)
 
             # Compute cosine similarites
             for name, score_function in self.score_functions.items():
@@ -430,6 +452,10 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
         prompt: str | None = None,
         **kwargs,
     ) -> np.ndarray:
+        precision = self.precision
+        if self._use_evaluator_quantization:
+            precision = "float32"
+
         if encode_fn_name is None:
             encode_fn = model.encode
         elif encode_fn_name == "query":
@@ -444,12 +470,63 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
             show_progress_bar=self.show_progress_bar,
             convert_to_tensor=True,
             truncate_dim=self.truncate_dim,
-            precision=self.precision,
+            precision=precision,
             normalize_embeddings=bool(self.precision),
             **kwargs,
         )
 
-    def _convert_to_float(self, embeddings: Tensor) -> Tensor:
+    def _compute_quantization_ranges(
+        self, model: SentenceTransformer, corpus_model: SentenceTransformer
+    ) -> np.ndarray | None:
+        if not self._use_evaluator_quantization or self.precision not in ("int8", "uint8"):
+            return None
+
+        if self.quantization_ranges is not None:
+            return self.quantization_ranges
+
+        sample_size = self.quantization_calibration_size
+        if sample_size == 0:
+            return None
+
+        query_calibration = self.queries
+        corpus_calibration = self.corpus
+        if sample_size is not None and sample_size > 0:
+            query_calibration = query_calibration[: min(sample_size, len(query_calibration))]
+            corpus_calibration = corpus_calibration[: min(sample_size, len(corpus_calibration))]
+
+        calibration_embeddings = []
+        if query_calibration:
+            query_embeddings = self.embed_inputs(
+                model,
+                query_calibration,
+                encode_fn_name="query",
+                prompt_name=self.query_prompt_name,
+                prompt=self.query_prompt,
+            )
+            calibration_embeddings.append(query_embeddings.cpu().numpy())
+
+        if corpus_calibration:
+            corpus_embeddings = self.embed_inputs(
+                corpus_model,
+                corpus_calibration,
+                encode_fn_name="document",
+                prompt_name=self.corpus_prompt_name,
+                prompt=self.corpus_prompt,
+            )
+            calibration_embeddings.append(corpus_embeddings.cpu().numpy())
+
+        if not calibration_embeddings:
+            return None
+
+        calibration_embeddings = np.vstack(calibration_embeddings)
+        return np.vstack((np.min(calibration_embeddings, axis=0), np.max(calibration_embeddings, axis=0)))
+
+    def _quantize_and_convert(self, embeddings: Tensor, ranges: np.ndarray | None = None) -> Tensor:
+        quantized_embeddings = quantize_embeddings(embeddings, precision=self.precision, ranges=ranges)
+        quantized_embeddings = torch.from_numpy(quantized_embeddings).to(embeddings.device)
+        return self._convert_to_float(quantized_embeddings, ranges=ranges)
+
+    def _convert_to_float(self, embeddings: Tensor, ranges: np.ndarray | None = None) -> Tensor:
         """
         Convert quantized embeddings to float32 for similarity computations.
         Handles int8, uint8, binary, and ubinary embeddings.
@@ -468,16 +545,29 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
             embeddings_np = embeddings.numpy()
             embeddings_np = (embeddings_np + 128).astype(np.uint8)
             embeddings_np = np.unpackbits(embeddings_np, axis=1)
+            if self.binary_reconstruction == "minus_one_one":
+                embeddings_np = embeddings_np.astype(np.float32) * 2 - 1
             return torch.from_numpy(embeddings_np.astype(np.float32)).to(embeddings.device)
 
         if self.precision == "ubinary":
             embeddings = embeddings.cpu()
             embeddings_np = embeddings.numpy()
             embeddings_np = np.unpackbits(embeddings_np, axis=1)
+            if self.binary_reconstruction == "minus_one_one":
+                embeddings_np = embeddings_np.astype(np.float32) * 2 - 1
             return torch.from_numpy(embeddings_np.astype(np.float32)).to(embeddings.device)
 
         # int8/uint8 just need type conversion
         if self.precision in ("int8", "uint8"):
+            if self.quantization_dequantize and ranges is not None:
+                starts = torch.from_numpy(ranges[0]).to(device=embeddings.device, dtype=torch.float32)
+                steps = torch.from_numpy((ranges[1] - ranges[0]) / 255.0).to(
+                    device=embeddings.device, dtype=torch.float32
+                )
+                steps = torch.clamp(steps, min=1e-12)
+                if self.precision == "int8":
+                    return (embeddings.float() + 128.0) * steps + starts
+                return embeddings.float() * steps + starts
             return embeddings.float()
 
         return embeddings
