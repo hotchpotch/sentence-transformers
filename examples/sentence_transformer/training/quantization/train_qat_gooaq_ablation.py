@@ -88,6 +88,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eval-precisions", default="float32,int8,binary")
     parser.add_argument("--train-precisions", default="float32,int8,binary")
     parser.add_argument("--quantization-weights", default="1.0,1.0,0.5")
+    parser.add_argument("--train-binary-mode", choices=["signed", "unsigned"], default="unsigned")
+    parser.add_argument("--train-use-int8-range-state", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--train-int8-range-momentum", type=float, default=0.99)
+    parser.add_argument("--train-quantization-warmup-steps", type=int, default=200)
     parser.add_argument("--skip-train", action="store_true")
     parser.add_argument("--save-final-model", action=argparse.BooleanOptionalAction, default=True)
     return parser.parse_args()
@@ -242,6 +246,10 @@ def main() -> None:
             loss=base_loss,
             quantization_precisions=train_precisions,
             quantization_weights=quantization_weights,
+            binary_mode=args.train_binary_mode,
+            use_int8_range_state=args.train_use_int8_range_state,
+            int8_range_momentum=args.train_int8_range_momentum,
+            quantization_warmup_steps=args.train_quantization_warmup_steps,
         )
 
         training_args = SentenceTransformerTrainingArguments(
@@ -314,6 +322,10 @@ def main() -> None:
             "train_precisions": train_precisions,
             "eval_precisions": eval_precisions,
             "quantization_weights": quantization_weights,
+            "train_binary_mode": args.train_binary_mode,
+            "train_use_int8_range_state": args.train_use_int8_range_state,
+            "train_int8_range_momentum": args.train_int8_range_momentum,
+            "train_quantization_warmup_steps": args.train_quantization_warmup_steps,
             "skip_train": args.skip_train,
         },
     )

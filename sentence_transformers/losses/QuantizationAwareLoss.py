@@ -18,7 +18,14 @@ from sentence_transformers.SentenceTransformer import SentenceTransformer
 logger = logging.getLogger(__name__)
 
 
-def quantize_embeddings_torch(embeddings: Tensor, precision: str) -> Tensor:
+def quantize_embeddings_torch(
+    embeddings: Tensor,
+    precision: str,
+    int8_range_state: dict[tuple[str, int], tuple[Tensor, Tensor]] | None = None,
+    use_int8_range_state: bool = False,
+    int8_range_momentum: float = 0.99,
+    binary_mode: Literal["signed", "unsigned"] = "unsigned",
+) -> Tensor:
     """
     Differentiable quantization for PyTorch tensors.
     Uses straight-through estimators to allow gradients to flow.
@@ -35,9 +42,20 @@ def quantize_embeddings_torch(embeddings: Tensor, precision: str) -> Tensor:
 
     if precision in ("int8", "uint8"):
         # Compute per-dimension min/max for quantization ranges
-        # Using the current batch for range calculation (in practice, you'd want to use calibration data)
         mins = embeddings.min(dim=0, keepdim=True)[0]
         maxs = embeddings.max(dim=0, keepdim=True)[0]
+
+        # Use a running EMA range to reduce bucket drift between batches.
+        # Only apply this to 2D tensors (batch, dim), where per-dimension calibration is well-defined.
+        if use_int8_range_state and int8_range_state is not None and embeddings.ndim == 2:
+            key = (precision, embeddings.shape[-1])
+            if key in int8_range_state:
+                previous_mins, previous_maxs = int8_range_state[key]
+                previous_mins = previous_mins.to(device=embeddings.device, dtype=embeddings.dtype)
+                previous_maxs = previous_maxs.to(device=embeddings.device, dtype=embeddings.dtype)
+                mins = int8_range_momentum * previous_mins + (1 - int8_range_momentum) * mins
+                maxs = int8_range_momentum * previous_maxs + (1 - int8_range_momentum) * maxs
+            int8_range_state[key] = (mins.detach().cpu(), maxs.detach().cpu())
 
         # Avoid division by zero
         scales = (maxs - mins) / 255.0
@@ -64,12 +82,11 @@ def quantize_embeddings_torch(embeddings: Tensor, precision: str) -> Tensor:
     if precision in ("binary", "ubinary"):
         # Binary quantization: threshold at 0
         # Using sign function with straight-through estimator
-        if precision == "binary":  # TODO: should still be 0/+1
+        if precision == "binary" and binary_mode == "signed":
             # Signed binary: -1 or +1
             quantized = torch.sign(embeddings)
-            # Handle zeros (map to +1)
             quantized = torch.where(quantized == 0, torch.ones_like(quantized), quantized)
-        else:  # ubinary
+        else:
             # Unsigned binary: 0 or +1
             quantized = (embeddings > 0).float()
 
@@ -88,13 +105,24 @@ class ForwardDecorator:
     This decorator is applied to `SentenceTransformer.forward`.
     """
 
-    def __init__(self, fn) -> None:
+    def __init__(
+        self,
+        fn,
+        int8_range_state: dict[tuple[str, int], tuple[Tensor, Tensor]] | None = None,
+        use_int8_range_state: bool = False,
+        int8_range_momentum: float = 0.99,
+        binary_mode: Literal["signed", "unsigned"] = "unsigned",
+    ) -> None:
         self.fn = fn
 
         self.precision = None
         self.cache = []
         self.caching_mode = True  # First call caches, subsequent calls use cache
         self.idx = 0
+        self.int8_range_state = int8_range_state
+        self.use_int8_range_state = use_int8_range_state
+        self.int8_range_momentum = int8_range_momentum
+        self.binary_mode = binary_mode
 
     def set_precision(self, precision: str | None) -> None:
         self.precision = precision
@@ -131,7 +159,14 @@ class ForwardDecorator:
 
     def _quantize(self, tensor: Tensor, precision: str) -> Tensor:
         """Quantize a tensor to the specified precision (differentiable)"""
-        return quantize_embeddings_torch(tensor, precision)
+        return quantize_embeddings_torch(
+            tensor,
+            precision,
+            int8_range_state=self.int8_range_state,
+            use_int8_range_state=self.use_int8_range_state,
+            int8_range_momentum=self.int8_range_momentum,
+            binary_mode=self.binary_mode,
+        )
 
 
 class CachedLossDecorator:
@@ -150,11 +185,19 @@ class CachedLossDecorator:
         quantization_precisions: Sequence[str],
         quantization_weights: Sequence[float] | Sequence[int],
         n_precisions_per_step: int = -1,
+        int8_range_state: dict[tuple[str, int], tuple[Tensor, Tensor]] | None = None,
+        use_int8_range_state: bool = False,
+        int8_range_momentum: float = 0.99,
+        binary_mode: Literal["signed", "unsigned"] = "unsigned",
     ) -> None:
         self.fn = fn
         self.quantization_precisions = quantization_precisions
         self.quantization_weights = quantization_weights
         self.n_precisions_per_step = n_precisions_per_step
+        self.int8_range_state = int8_range_state
+        self.use_int8_range_state = use_int8_range_state
+        self.int8_range_momentum = int8_range_momentum
+        self.binary_mode = binary_mode
 
     def __call__(self, reps: list[list[Tensor]], *args, **kwargs) -> Tensor:
         # Select which precisions to use this step
@@ -208,7 +251,14 @@ class CachedLossDecorator:
 
     def _quantize(self, tensor: Tensor, precision: str) -> Tensor:
         """Quantize a tensor to the specified precision (differentiable)"""
-        return quantize_embeddings_torch(tensor, precision)
+        return quantize_embeddings_torch(
+            tensor,
+            precision,
+            int8_range_state=self.int8_range_state,
+            use_int8_range_state=self.use_int8_range_state,
+            int8_range_momentum=self.int8_range_momentum,
+            binary_mode=self.binary_mode,
+        )
 
 
 class QuantizationAwareLoss(nn.Module):
@@ -219,6 +269,10 @@ class QuantizationAwareLoss(nn.Module):
         quantization_precisions: Sequence[Literal["float32", "int8", "uint8", "binary", "ubinary"]],
         quantization_weights: Sequence[float] | Sequence[int] | None = None,
         n_precisions_per_step: int = -1,
+        binary_mode: Literal["signed", "unsigned"] = "unsigned",
+        use_int8_range_state: bool = True,
+        int8_range_momentum: float = 0.99,
+        quantization_warmup_steps: int = 0,
     ) -> None:
         """
         The QuantizationAwareLoss can be seen as a loss *modifier* that allows you to use other loss functions with
@@ -244,6 +298,13 @@ class QuantizationAwareLoss(nn.Module):
                 If -1, then all precisions are used. If > 0, then a
                 random sample of n_precisions_per_step precisions are used per
                 step. The default value is -1.
+            binary_mode: Quantization mode for the "binary" precision.
+                "unsigned" uses 0/+1 and "signed" uses -1/+1.
+            use_int8_range_state: Whether to apply EMA-stabilized ranges for
+                int8/uint8 quantization.
+            int8_range_momentum: EMA momentum for int8/uint8 running ranges.
+            quantization_warmup_steps: Number of initial training steps where
+                non-float32 quantization weights are linearly warmed up.
 
         References:
             - Quantization-Aware Training: https://arxiv.org/abs/1712.05877
@@ -302,6 +363,15 @@ class QuantizationAwareLoss(nn.Module):
         self.quantization_precisions = tuple(quantization_precisions)
         self.quantization_weights = tuple(quantization_weights)
         self.n_precisions_per_step = n_precisions_per_step
+        self.binary_mode = binary_mode
+        self.use_int8_range_state = use_int8_range_state
+        self.int8_range_momentum = int8_range_momentum
+        self.quantization_warmup_steps = quantization_warmup_steps
+        self.global_step = 0
+        self.int8_range_state: dict[tuple[str, int], tuple[Tensor, Tensor]] = {}
+
+        if binary_mode not in ("signed", "unsigned"):
+            raise ValueError("binary_mode must be either 'signed' or 'unsigned'.")
 
         # The Cached... losses require a special treatment as their backward pass is incompatible with the
         # ForwardDecorator approach. Instead, we use a CachedLossDecorator to compute the loss for each
@@ -313,20 +383,41 @@ class QuantizationAwareLoss(nn.Module):
         )
         if isinstance(loss, self.cached_losses):
             loss.calculate_loss = CachedLossDecorator(
-                loss.calculate_loss, self.quantization_precisions, self.quantization_weights, n_precisions_per_step
+                loss.calculate_loss,
+                self.quantization_precisions,
+                self.quantization_weights,
+                n_precisions_per_step,
+                int8_range_state=self.int8_range_state,
+                use_int8_range_state=self.use_int8_range_state,
+                int8_range_momentum=self.int8_range_momentum,
+                binary_mode=self.binary_mode,
             )
+
+    def _scaled_weight(self, precision: str, base_weight: float | int) -> float:
+        if precision == "float32" or self.quantization_warmup_steps <= 0:
+            return float(base_weight)
+        warmup_ratio = min(1.0, (self.global_step + 1) / self.quantization_warmup_steps)
+        return float(base_weight) * warmup_ratio
 
     def forward(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor) -> dict[str, Tensor]:
         # For the Cached... losses, the CachedLossDecorator has been applied to the `calculate_loss` method,
         # so we can directly call the loss function.
         if isinstance(self.loss, self.cached_losses):
-            return self.loss(sentence_features, labels)
+            outputs = self.loss(sentence_features, labels)
+            self.global_step += 1
+            return outputs
 
         # Otherwise, we apply the ForwardDecorator to the model's forward pass, which will cache the output
         # embeddings on the first pass, then reuse them for subsequent quantization precisions.
         original_forward = self.model.forward
         try:
-            decorated_forward = ForwardDecorator(original_forward)
+            decorated_forward = ForwardDecorator(
+                original_forward,
+                int8_range_state=self.int8_range_state,
+                use_int8_range_state=self.use_int8_range_state,
+                int8_range_momentum=self.int8_range_momentum,
+                binary_mode=self.binary_mode,
+            )
             self.model.forward = decorated_forward
 
             # Select which precisions to use this step
@@ -344,7 +435,7 @@ class QuantizationAwareLoss(nn.Module):
             loss = self.loss(sentence_features, labels)
             if "float32" in self.quantization_precisions:
                 float32_idx = self.quantization_precisions.index("float32")
-                weight = self.quantization_weights[float32_idx]
+                weight = self._scaled_weight("float32", self.quantization_weights[float32_idx])
                 losses["qat_float32"] = weight * loss
 
             # Subsequent passes: use cached embeddings with quantization
@@ -355,20 +446,28 @@ class QuantizationAwareLoss(nn.Module):
                 if precision == "float32":
                     continue
 
-                weight = self.quantization_weights[idx]
+                weight = self._scaled_weight(precision, self.quantization_weights[idx])
                 decorated_forward.set_precision(precision)
 
                 # If the labels seem to be embeddings, quantize them to match the soon-to-be-quantized predicted embeddings
                 # This allows for QuantizationAwareLoss with a direct distillation loss
                 precision_labels = labels
                 if isinstance(labels, Tensor) and len(labels.shape) >= 2:
-                    precision_labels = quantize_embeddings_torch(labels, precision)
+                    precision_labels = quantize_embeddings_torch(
+                        labels,
+                        precision,
+                        int8_range_state=self.int8_range_state,
+                        use_int8_range_state=self.use_int8_range_state,
+                        int8_range_momentum=self.int8_range_momentum,
+                        binary_mode=self.binary_mode,
+                    )
 
                 step_loss = weight * self.loss(sentence_features, precision_labels)
                 losses[f"qat_{precision}"] = step_loss
 
         finally:
             self.model.forward = original_forward
+        self.global_step += 1
         return losses
 
     def get_config_dict(self) -> dict[str, Any]:
@@ -377,6 +476,10 @@ class QuantizationAwareLoss(nn.Module):
             "quantization_precisions": self.quantization_precisions,
             "quantization_weights": self.quantization_weights,
             "n_precisions_per_step": self.n_precisions_per_step,
+            "binary_mode": self.binary_mode,
+            "use_int8_range_state": self.use_int8_range_state,
+            "int8_range_momentum": self.int8_range_momentum,
+            "quantization_warmup_steps": self.quantization_warmup_steps,
         }
 
     @property
