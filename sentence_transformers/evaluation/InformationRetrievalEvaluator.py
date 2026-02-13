@@ -152,6 +152,9 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
         quantization_eval_mode: Literal["legacy", "evaluator"] = "legacy",
         quantization_calibration_size: int | None = 1024,
         quantization_ranges: np.ndarray | None = None,
+        quantization_range_strategy: Literal["minmax", "rolling_std"] = "minmax",
+        quantization_rolling_momentum: float = 0.99,
+        quantization_rolling_std_multiplier: float = 1.0,
         quantization_dequantize: bool = True,
         binary_reconstruction: Literal["zero_one", "minus_one_one"] = "zero_one",
         quantize_queries: bool = True,
@@ -192,6 +195,9 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
         self.quantization_eval_mode = quantization_eval_mode
         self.quantization_calibration_size = quantization_calibration_size
         self.quantization_ranges = quantization_ranges
+        self.quantization_range_strategy = quantization_range_strategy
+        self.quantization_rolling_momentum = quantization_rolling_momentum
+        self.quantization_rolling_std_multiplier = quantization_rolling_std_multiplier
         self.quantization_dequantize = quantization_dequantize
         self.binary_reconstruction = binary_reconstruction
         self.quantize_queries = quantize_queries
@@ -525,7 +531,36 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
             return None
 
         calibration_embeddings = np.vstack(calibration_embeddings)
+        if self.quantization_range_strategy == "rolling_std":
+            return self._compute_rolling_std_ranges(calibration_embeddings)
         return np.vstack((np.min(calibration_embeddings, axis=0), np.max(calibration_embeddings, axis=0)))
+
+    def _compute_rolling_std_ranges(self, calibration_embeddings: np.ndarray) -> np.ndarray:
+        if len(calibration_embeddings) == 0:
+            raise ValueError("Calibration embeddings must not be empty for rolling_std quantization ranges.")
+
+        momentum = self.quantization_rolling_momentum
+        std_multiplier = self.quantization_rolling_std_multiplier
+        batch_size = min(256, len(calibration_embeddings))
+
+        ema_mean = None
+        ema_std = None
+        for start_idx in range(0, len(calibration_embeddings), batch_size):
+            batch = calibration_embeddings[start_idx : start_idx + batch_size]
+            batch_mean = np.mean(batch, axis=0)
+            batch_std = np.std(batch, axis=0)
+
+            if ema_mean is None:
+                ema_mean = batch_mean
+                ema_std = batch_std
+            else:
+                ema_mean = momentum * ema_mean + (1.0 - momentum) * batch_mean
+                ema_std = momentum * ema_std + (1.0 - momentum) * batch_std
+
+        starts = ema_mean - std_multiplier * ema_std
+        ends = ema_mean + std_multiplier * ema_std
+        ends = np.maximum(ends, starts + 1e-6)
+        return np.vstack((starts, ends))
 
     def _quantize_and_convert(self, embeddings: Tensor, ranges: np.ndarray | None = None) -> Tensor:
         quantized_embeddings = quantize_embeddings(embeddings, precision=self.precision, ranges=ranges)

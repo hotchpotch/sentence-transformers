@@ -232,6 +232,14 @@ class NanoBEIREvaluator(SentenceEvaluator):
         write_predictions: bool = False,
         precision: str = "float32",
         quantize_queries: bool = True,
+        quantization_eval_mode: Literal["legacy", "evaluator"] = "legacy",
+        quantization_calibration_size: int | None = 1024,
+        quantization_ranges: np.ndarray | None = None,
+        quantization_range_strategy: Literal["minmax", "rolling_std"] = "minmax",
+        quantization_rolling_momentum: float = 0.99,
+        quantization_rolling_std_multiplier: float = 1.0,
+        quantization_dequantize: bool = True,
+        binary_reconstruction: Literal["zero_one", "minus_one_one"] = "zero_one",
     ):
         super().__init__()
         if dataset_names is None:
@@ -251,6 +259,14 @@ class NanoBEIREvaluator(SentenceEvaluator):
         self.truncate_dim = truncate_dim
         self.precision = precision
         self.quantize_queries = quantize_queries
+        self.quantization_eval_mode = quantization_eval_mode
+        self.quantization_calibration_size = quantization_calibration_size
+        self.quantization_ranges = quantization_ranges
+        self.quantization_range_strategy = quantization_range_strategy
+        self.quantization_rolling_momentum = quantization_rolling_momentum
+        self.quantization_rolling_std_multiplier = quantization_rolling_std_multiplier
+        self.quantization_dequantize = quantization_dequantize
+        self.binary_reconstruction = binary_reconstruction
         self.name = f"NanoBEIR_{aggregate_key}"
         if self.truncate_dim:
             self.name += f"_{self.truncate_dim}"
@@ -281,6 +297,14 @@ class NanoBEIREvaluator(SentenceEvaluator):
             "write_predictions": write_predictions,
             "precision": self.precision,
             "quantize_queries": self.quantize_queries,
+            "quantization_eval_mode": self.quantization_eval_mode,
+            "quantization_calibration_size": self.quantization_calibration_size,
+            "quantization_ranges": self.quantization_ranges,
+            "quantization_range_strategy": self.quantization_range_strategy,
+            "quantization_rolling_momentum": self.quantization_rolling_momentum,
+            "quantization_rolling_std_multiplier": self.quantization_rolling_std_multiplier,
+            "quantization_dequantize": self.quantization_dequantize,
+            "binary_reconstruction": self.binary_reconstruction,
         }
         self.evaluators = [
             self._load_dataset(name, **ir_evaluator_kwargs)

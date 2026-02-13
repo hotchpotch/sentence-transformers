@@ -96,3 +96,33 @@ def test_ir_evaluator_docs_only_quantization_keeps_query_float32():
 
     assert model.calls[0] == ("query", "float32")
     assert model.calls[1] == ("document", "int8")
+
+
+def test_ir_evaluator_rolling_std_quantization_ranges():
+    queries = {"q1": "query 1", "q2": "query 2"}
+    corpus = {"d1": "doc 1", "d2": "doc 2"}
+    relevant_docs = {"q1": {"d1"}, "q2": {"d2"}}
+    evaluator = InformationRetrievalEvaluator(
+        queries=queries,
+        corpus=corpus,
+        relevant_docs=relevant_docs,
+        precision="int8",
+        quantization_eval_mode="evaluator",
+        quantization_range_strategy="rolling_std",
+        quantization_rolling_momentum=0.5,
+        quantization_rolling_std_multiplier=1.0,
+    )
+
+    def fake_embed_inputs(*args, encode_fn_name=None, **kwargs):
+        if encode_fn_name == "query":
+            return torch.tensor([[0.0, 2.0], [2.0, 4.0]], dtype=torch.float32)
+        return torch.tensor([[1.0, 3.0], [3.0, 5.0]], dtype=torch.float32)
+
+    evaluator.embed_inputs = fake_embed_inputs
+    ranges = evaluator._compute_quantization_ranges(model=None, corpus_model=None)
+
+    expected_mean = np.array([1.5, 3.5], dtype=np.float32)
+    expected_std = np.array([1.118034, 1.118034], dtype=np.float32)
+    expected = np.vstack((expected_mean - expected_std, expected_mean + expected_std))
+
+    assert np.allclose(ranges, expected, atol=1e-5)

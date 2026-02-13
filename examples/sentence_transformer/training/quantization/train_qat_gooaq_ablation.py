@@ -82,6 +82,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eval-benchmark", choices=["gooaq-dev", "nanobeir"], default="gooaq-dev")
     parser.add_argument("--eval-quantization-mode", choices=["legacy", "evaluator"], default="legacy")
     parser.add_argument("--eval-calibration-size", type=int, default=1024)
+    parser.add_argument("--eval-int8-range-strategy", choices=["minmax", "rolling_std"], default="minmax")
+    parser.add_argument("--eval-int8-range-momentum", type=float, default=0.99)
+    parser.add_argument("--eval-int8-range-std-multiplier", type=float, default=1.0)
     parser.add_argument(
         "--eval-binary-reconstruction",
         choices=["zero_one", "minus_one_one"],
@@ -118,6 +121,9 @@ def create_gooaq_evaluator(
     eval_binary_reconstruction: str,
     eval_dequantize: bool,
     eval_quantize_queries: bool,
+    eval_range_strategy: str,
+    eval_rolling_momentum: float,
+    eval_rolling_std_multiplier: float,
 ) -> SequentialEvaluator:
     random.seed(12)
     queries = dict(zip(eval_dataset["id"], eval_dataset["question"]))
@@ -136,6 +142,9 @@ def create_gooaq_evaluator(
                 precision=precision,
                 quantization_eval_mode=eval_quantization_mode,
                 quantization_calibration_size=eval_calibration_size,
+                quantization_range_strategy=eval_range_strategy,
+                quantization_rolling_momentum=eval_rolling_momentum,
+                quantization_rolling_std_multiplier=eval_rolling_std_multiplier,
                 quantization_dequantize=eval_dequantize,
                 binary_reconstruction=eval_binary_reconstruction,
                 quantize_queries=eval_quantize_queries,
@@ -151,6 +160,13 @@ def create_nanobeir_evaluator(
     dataset_names: list[str],
     batch_size: int,
     quantize_queries: bool,
+    eval_quantization_mode: str,
+    eval_calibration_size: int,
+    eval_dequantize: bool,
+    eval_binary_reconstruction: str,
+    eval_range_strategy: str,
+    eval_rolling_momentum: float,
+    eval_rolling_std_multiplier: float,
 ) -> SequentialEvaluator:
     evaluators = []
     for precision in eval_precisions:
@@ -163,6 +179,13 @@ def create_nanobeir_evaluator(
                 write_csv=False,
                 precision=precision,
                 quantize_queries=quantize_queries,
+                quantization_eval_mode=eval_quantization_mode,
+                quantization_calibration_size=eval_calibration_size,
+                quantization_dequantize=eval_dequantize,
+                binary_reconstruction=eval_binary_reconstruction,
+                quantization_range_strategy=eval_range_strategy,
+                quantization_rolling_momentum=eval_rolling_momentum,
+                quantization_rolling_std_multiplier=eval_rolling_std_multiplier,
             )
         )
     return SequentialEvaluator(evaluators, main_score_function=lambda scores: scores[0])
@@ -291,6 +314,9 @@ def main() -> None:
             eval_binary_reconstruction=args.eval_binary_reconstruction,
             eval_dequantize=args.eval_dequantize,
             eval_quantize_queries=args.eval_quantize_queries,
+            eval_range_strategy=args.eval_int8_range_strategy,
+            eval_rolling_momentum=args.eval_int8_range_momentum,
+            eval_rolling_std_multiplier=args.eval_int8_range_std_multiplier,
         )
     else:
         evaluator = create_nanobeir_evaluator(
@@ -299,6 +325,13 @@ def main() -> None:
             dataset_names=parse_csv_list(args.nanobeir_dataset_names, str),
             batch_size=args.nanobeir_batch_size,
             quantize_queries=args.eval_quantize_queries,
+            eval_quantization_mode=args.eval_quantization_mode,
+            eval_calibration_size=args.eval_calibration_size,
+            eval_dequantize=args.eval_dequantize,
+            eval_binary_reconstruction=args.eval_binary_reconstruction,
+            eval_range_strategy=args.eval_int8_range_strategy,
+            eval_rolling_momentum=args.eval_int8_range_momentum,
+            eval_rolling_std_multiplier=args.eval_int8_range_std_multiplier,
         )
 
     logger.info("Evaluating before training")
@@ -392,6 +425,9 @@ def main() -> None:
             "eval_benchmark": args.eval_benchmark,
             "eval_quantization_mode": args.eval_quantization_mode,
             "eval_calibration_size": args.eval_calibration_size,
+            "eval_int8_range_strategy": args.eval_int8_range_strategy,
+            "eval_int8_range_momentum": args.eval_int8_range_momentum,
+            "eval_int8_range_std_multiplier": args.eval_int8_range_std_multiplier,
             "eval_binary_reconstruction": args.eval_binary_reconstruction,
             "eval_dequantize": args.eval_dequantize,
             "eval_quantize_queries": args.eval_quantize_queries,
