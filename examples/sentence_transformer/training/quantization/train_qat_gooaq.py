@@ -170,14 +170,14 @@ model.save_pretrained(final_output_dir)
 
 # 9. (Optional) save the model to the Hugging Face Hub!
 # It is recommended to run `huggingface-cli login` to log into your Hugging Face account first
-try:
-    model.push_to_hub(run_name)
-except Exception:
-    logging.error(
-        f"Error uploading model to the Hugging Face Hub:\n{traceback.format_exc()}To upload it manually, you can run "
-        f"`huggingface-cli login`, followed by loading the model using `model = SentenceTransformer({final_output_dir!r})` "
-        f"and saving it using `model.push_to_hub('{run_name}')`."
-    )
+# try:
+#     model.push_to_hub(run_name)
+# except Exception:
+#     logging.error(
+#         f"Error uploading model to the Hugging Face Hub:\n{traceback.format_exc()}To upload it manually, you can run "
+#         f"`huggingface-cli login`, followed by loading the model using `model = SentenceTransformer({final_output_dir!r})` "
+#         f"and saving it using `model.push_to_hub('{run_name}')`."
+#     )
 
 logging.info("\n✅ Training complete!")
 logging.info(f"Model saved to: {final_output_dir}")

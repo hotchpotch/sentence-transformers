@@ -36,6 +36,7 @@ coverage.xml
 /examples/datasets/
 /examples/embeddings/
 /examples/sentence_transformer/training/quora_duplicate_questions/quora-IR-dataset/
+/examples/sentence_transformer/training/quantization/models/
 examples/datasets/*/
 
 
