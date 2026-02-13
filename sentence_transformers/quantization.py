@@ -427,11 +427,17 @@ def quantize_embeddings(
                 ranges = np.vstack((np.min(embeddings, axis=0), np.max(embeddings, axis=0)))
         starts = ranges[0, :]
         steps = (ranges[1, :] - ranges[0, :]) / 255
+        steps = np.clip(steps, a_min=1e-12, a_max=None)
+        normalized = (embeddings - starts) / steps
 
         if precision == "uint8":
-            return ((embeddings - starts) / steps).astype(np.uint8)
+            quantized = np.rint(normalized)
+            quantized = np.clip(quantized, 0, 255)
+            return quantized.astype(np.uint8)
         elif precision == "int8":
-            return ((embeddings - starts) / steps - 128).astype(np.int8)
+            quantized = np.rint(normalized) - 128
+            quantized = np.clip(quantized, -128, 127)
+            return quantized.astype(np.int8)
 
     if precision == "binary":
         return (np.packbits(embeddings > 0).reshape(embeddings.shape[0], -1) - 128).astype(np.int8)

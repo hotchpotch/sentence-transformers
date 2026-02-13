@@ -312,7 +312,7 @@ class EmbeddingSimilarityEvaluator(SentenceEvaluator):
             return embeddings
 
         if self.precision == "binary":
-            embeddings = (embeddings + 128).astype(np.uint8)
+            embeddings = (embeddings.astype(np.int16) + 128).astype(np.uint8)
             embeddings = np.unpackbits(embeddings, axis=1).astype(np.float32)
             if self.binary_reconstruction == "minus_one_one":
                 embeddings = embeddings * 2 - 1
