@@ -1,0 +1,58 @@
+{
+  "baseline_run": "mpnet-base-gooaq-qat-local-baseline-mnrl-nanobeir-card-s42-20260213-205633",
+  "candidate_config": {
+    "seed": 42,
+    "train_binary_mode": "signed",
+    "train_int8_range_momentum": 0.99,
+    "train_loss": "qat",
+    "train_precision_warmup_steps": [
+      0,
+      200,
+      1200
+    ],
+    "train_quantization_warmup_steps": 0,
+    "train_use_int8_range_state": true
+  },
+  "candidate_run": "mpnet-base-gooaq-qat-step4b-trainB-ema-per-precision-warmup-20260213-213450",
+  "delta": {
+    "vs_baseline": {
+      "binary": 0.02598678582566516,
+      "float32": -0.009529732279467296,
+      "int8": 0.0016373493864274558
+    },
+    "vs_step4a": {
+      "binary": 0.02673916464021797,
+      "float32": 0.004559476506239002,
+      "int8": 0.012087892459966554
+    },
+    "vs_trainB": {
+      "binary": 0.009280363930014524,
+      "float32": -0.000480987620724016,
+      "int8": 0.01712819738749438
+    }
+  },
+  "ndcg10": {
+    "baseline": {
+      "binary": 0.4772903910172228,
+      "float32": 0.5295846675042574,
+      "int8": 0.5148909762541771
+    },
+    "candidate": {
+      "binary": 0.503277176842888,
+      "float32": 0.5200549352247901,
+      "int8": 0.5165283256406046
+    },
+    "step4a": {
+      "binary": 0.47653801220267,
+      "float32": 0.5154954587185511,
+      "int8": 0.504440433180638
+    },
+    "trainB": {
+      "binary": 0.49399681291287345,
+      "float32": 0.5205359228455141,
+      "int8": 0.4994001282531102
+    }
+  },
+  "step4a_run": "mpnet-base-gooaq-qat-step4a-trainB-per-precision-warmup-20260213-213027",
+  "trainB_run": "mpnet-base-gooaq-qat-local-trainB-qat-nanobeir-card-s42-20260213-205935"
+}
