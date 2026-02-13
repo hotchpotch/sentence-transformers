@@ -102,6 +102,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--train-use-int8-range-state", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--train-int8-range-momentum", type=float, default=0.99)
     parser.add_argument("--train-quantization-warmup-steps", type=int, default=200)
+    parser.add_argument(
+        "--train-precision-warmup-steps",
+        default="",
+        help="Optional CSV of warmup steps aligned with --train-precisions, e.g. 0,200,800",
+    )
     parser.add_argument("--skip-train", action="store_true")
     parser.add_argument("--eval-during-train", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--save-final-model", action=argparse.BooleanOptionalAction, default=True)
@@ -275,8 +280,16 @@ def main() -> None:
     train_precisions = parse_csv_list(args.train_precisions, str)
     eval_precisions = parse_csv_list(args.eval_precisions, str)
     quantization_weights = parse_csv_list(args.quantization_weights, float)
+    precision_warmup_steps = (
+        parse_csv_list(args.train_precision_warmup_steps, int) if args.train_precision_warmup_steps.strip() else None
+    )
     if len(train_precisions) != len(quantization_weights):
         raise ValueError("`--train-precisions` and `--quantization-weights` must have matching lengths.")
+    quantization_warmup_steps_by_precision = None
+    if precision_warmup_steps is not None:
+        if len(train_precisions) != len(precision_warmup_steps):
+            raise ValueError("`--train-precision-warmup-steps` must match the length of `--train-precisions`.")
+        quantization_warmup_steps_by_precision = dict(zip(train_precisions, precision_warmup_steps))
 
     short_model_name = sanitize_name(args.model_name.split("/")[-1])
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -350,6 +363,7 @@ def main() -> None:
                 use_int8_range_state=args.train_use_int8_range_state,
                 int8_range_momentum=args.train_int8_range_momentum,
                 quantization_warmup_steps=args.train_quantization_warmup_steps,
+                quantization_warmup_steps_by_precision=quantization_warmup_steps_by_precision,
             )
         else:
             loss = base_loss
@@ -441,6 +455,7 @@ def main() -> None:
             "train_use_int8_range_state": args.train_use_int8_range_state,
             "train_int8_range_momentum": args.train_int8_range_momentum,
             "train_quantization_warmup_steps": args.train_quantization_warmup_steps,
+            "train_precision_warmup_steps": precision_warmup_steps,
             "skip_train": args.skip_train,
             "eval_during_train": args.eval_during_train,
         },

@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import torch
 
-from sentence_transformers.losses.QuantizationAwareLoss import quantize_embeddings_torch
+import pytest
+
+from sentence_transformers.losses.QuantizationAwareLoss import (
+    quantize_embeddings_torch,
+    resolve_warmup_steps_by_precision,
+)
 
 
 def test_quantize_embeddings_torch_binary_unsigned_mode():
@@ -49,3 +54,33 @@ def test_quantize_embeddings_torch_int8_range_state_updates_with_ema():
 
     quantized_step_2.sum().backward()
     assert embeddings_step_2.grad is not None
+
+
+def test_resolve_warmup_steps_by_precision_defaults_and_overrides():
+    warmups = resolve_warmup_steps_by_precision(
+        quantization_precisions=("float32", "int8", "binary"),
+        quantization_warmup_steps=200,
+        quantization_warmup_steps_by_precision={"int8": 100, "binary": 800},
+    )
+
+    assert warmups["float32"] == 0
+    assert warmups["int8"] == 100
+    assert warmups["binary"] == 800
+
+
+def test_resolve_warmup_steps_by_precision_rejects_unknown_precision():
+    with pytest.raises(ValueError, match="Unknown precision"):
+        resolve_warmup_steps_by_precision(
+            quantization_precisions=("float32", "int8"),
+            quantization_warmup_steps=200,
+            quantization_warmup_steps_by_precision={"binary": 100},
+        )
+
+
+def test_resolve_warmup_steps_by_precision_rejects_negative_warmup():
+    with pytest.raises(ValueError, match="must be >= 0"):
+        resolve_warmup_steps_by_precision(
+            quantization_precisions=("float32", "int8"),
+            quantization_warmup_steps=200,
+            quantization_warmup_steps_by_precision={"int8": -1},
+        )

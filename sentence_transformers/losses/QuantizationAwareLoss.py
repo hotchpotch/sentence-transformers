@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import random
 from collections.abc import Iterable, Sequence
-from typing import Any, Literal
+from typing import Any, Callable, Literal, Mapping
 
 import torch
 from torch import Tensor, nn
@@ -16,6 +16,41 @@ from sentence_transformers.losses import (
 from sentence_transformers.SentenceTransformer import SentenceTransformer
 
 logger = logging.getLogger(__name__)
+
+
+def resolve_warmup_steps_by_precision(
+    quantization_precisions: Sequence[str],
+    quantization_warmup_steps: int,
+    quantization_warmup_steps_by_precision: Mapping[str, int] | None = None,
+) -> dict[str, int]:
+    """
+    Build warmup steps per precision.
+
+    A global warmup value is used as default for all non-float32 precisions, and can
+    be overridden per precision via `quantization_warmup_steps_by_precision`.
+    """
+    warmup_steps_by_precision = {
+        precision: (0 if precision == "float32" else int(quantization_warmup_steps))
+        for precision in quantization_precisions
+    }
+    if quantization_warmup_steps_by_precision is None:
+        return warmup_steps_by_precision
+
+    unknown_precisions = set(quantization_warmup_steps_by_precision.keys()) - set(quantization_precisions)
+    if unknown_precisions:
+        unknown_precisions_str = ", ".join(sorted(unknown_precisions))
+        raise ValueError(f"Unknown precision(s) in quantization_warmup_steps_by_precision: {unknown_precisions_str}")
+
+    for precision, steps in quantization_warmup_steps_by_precision.items():
+        if steps < 0:
+            raise ValueError(f"Warmup steps for precision '{precision}' must be >= 0, got {steps}.")
+        warmup_steps_by_precision[precision] = int(steps)
+
+    # Keep float32 weight unscaled regardless of user-provided values.
+    if "float32" in warmup_steps_by_precision:
+        warmup_steps_by_precision["float32"] = 0
+
+    return warmup_steps_by_precision
 
 
 def quantize_embeddings_torch(
@@ -189,6 +224,7 @@ class CachedLossDecorator:
         use_int8_range_state: bool = False,
         int8_range_momentum: float = 0.99,
         binary_mode: Literal["signed", "unsigned"] = "unsigned",
+        scaled_weight_fn: Callable[[str, float | int], float] | None = None,
     ) -> None:
         self.fn = fn
         self.quantization_precisions = quantization_precisions
@@ -198,6 +234,7 @@ class CachedLossDecorator:
         self.use_int8_range_state = use_int8_range_state
         self.int8_range_momentum = int8_range_momentum
         self.binary_mode = binary_mode
+        self.scaled_weight_fn = scaled_weight_fn
 
     def __call__(self, reps: list[list[Tensor]], *args, **kwargs) -> Tensor:
         # Select which precisions to use this step
@@ -210,7 +247,7 @@ class CachedLossDecorator:
         loss = None
         if "float32" in self.quantization_precisions:
             float32_idx = self.quantization_precisions.index("float32")
-            weight = self.quantization_weights[float32_idx]
+            weight = self._scaled_weight("float32", self.quantization_weights[float32_idx])
             loss = weight * self.fn(reps, *args, **kwargs)
         else:
             # Just cache, don't include in loss
@@ -223,7 +260,7 @@ class CachedLossDecorator:
             if precision == "float32":
                 continue
 
-            weight = self.quantization_weights[idx]
+            weight = self._scaled_weight(precision, self.quantization_weights[idx])
 
             # Quantize embeddings
             quantized = [[self._quantize(r, precision) for r in minibatch] for minibatch in reps]
@@ -249,6 +286,11 @@ class CachedLossDecorator:
 
         return loss
 
+    def _scaled_weight(self, precision: str, base_weight: float | int) -> float:
+        if self.scaled_weight_fn is None:
+            return float(base_weight)
+        return self.scaled_weight_fn(precision, base_weight)
+
     def _quantize(self, tensor: Tensor, precision: str) -> Tensor:
         """Quantize a tensor to the specified precision (differentiable)"""
         return quantize_embeddings_torch(
@@ -273,6 +315,7 @@ class QuantizationAwareLoss(nn.Module):
         use_int8_range_state: bool = True,
         int8_range_momentum: float = 0.99,
         quantization_warmup_steps: int = 0,
+        quantization_warmup_steps_by_precision: Mapping[str, int] | None = None,
     ) -> None:
         """
         The QuantizationAwareLoss can be seen as a loss *modifier* that allows you to use other loss functions with
@@ -305,6 +348,10 @@ class QuantizationAwareLoss(nn.Module):
             int8_range_momentum: EMA momentum for int8/uint8 running ranges.
             quantization_warmup_steps: Number of initial training steps where
                 non-float32 quantization weights are linearly warmed up.
+            quantization_warmup_steps_by_precision:
+                Optional precision-specific warmup steps, e.g.
+                {"int8": 200, "binary": 800}. If provided, these values
+                override `quantization_warmup_steps` for matching precisions.
 
         References:
             - Quantization-Aware Training: https://arxiv.org/abs/1712.05877
@@ -367,6 +414,11 @@ class QuantizationAwareLoss(nn.Module):
         self.use_int8_range_state = use_int8_range_state
         self.int8_range_momentum = int8_range_momentum
         self.quantization_warmup_steps = quantization_warmup_steps
+        self.quantization_warmup_steps_by_precision = resolve_warmup_steps_by_precision(
+            self.quantization_precisions,
+            quantization_warmup_steps=self.quantization_warmup_steps,
+            quantization_warmup_steps_by_precision=quantization_warmup_steps_by_precision,
+        )
         self.global_step = 0
         self.int8_range_state: dict[tuple[str, int], tuple[Tensor, Tensor]] = {}
 
@@ -391,12 +443,14 @@ class QuantizationAwareLoss(nn.Module):
                 use_int8_range_state=self.use_int8_range_state,
                 int8_range_momentum=self.int8_range_momentum,
                 binary_mode=self.binary_mode,
+                scaled_weight_fn=self._scaled_weight,
             )
 
     def _scaled_weight(self, precision: str, base_weight: float | int) -> float:
-        if precision == "float32" or self.quantization_warmup_steps <= 0:
+        warmup_steps = self.quantization_warmup_steps_by_precision.get(precision, self.quantization_warmup_steps)
+        if precision == "float32" or warmup_steps <= 0:
             return float(base_weight)
-        warmup_ratio = min(1.0, (self.global_step + 1) / self.quantization_warmup_steps)
+        warmup_ratio = min(1.0, (self.global_step + 1) / warmup_steps)
         return float(base_weight) * warmup_ratio
 
     def forward(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor) -> dict[str, Tensor]:
@@ -480,6 +534,7 @@ class QuantizationAwareLoss(nn.Module):
             "use_int8_range_state": self.use_int8_range_state,
             "int8_range_momentum": self.int8_range_momentum,
             "quantization_warmup_steps": self.quantization_warmup_steps,
+            "quantization_warmup_steps_by_precision": self.quantization_warmup_steps_by_precision,
         }
 
     @property
