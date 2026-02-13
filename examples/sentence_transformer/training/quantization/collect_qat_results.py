@@ -41,8 +41,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--entry",
         action="append",
-        required=True,
+        default=[],
         help="Entry format: label|path|group|variant (group/variant optional)",
+    )
+    parser.add_argument(
+        "--entries-file",
+        action="append",
+        default=[],
+        help="Optional file path containing one entry per line. Supports either TSV: label<TAB>path<TAB>group<TAB>variant or entry format label|path|group|variant.",
     )
     return parser.parse_args()
 
@@ -119,8 +125,27 @@ def fmt(value: float | None) -> str:
 def main() -> None:
     args = parse_args()
 
+    if not args.entry and not args.entries_file:
+        raise ValueError("Provide at least one --entry or --entries-file.")
+
     rows = []
-    for entry in args.entry:
+    all_entries: list[str] = list(args.entry)
+    for entries_file in args.entries_file:
+        for line in Path(entries_file).read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "\t" in line:
+                parts = line.split("\t")
+                label = parts[0].strip()
+                path = parts[1].strip() if len(parts) > 1 else ""
+                group = parts[2].strip() if len(parts) > 2 else "default"
+                variant = parts[3].strip() if len(parts) > 3 else label
+                all_entries.append(f"{label}|{path}|{group}|{variant}")
+            else:
+                all_entries.append(line)
+
+    for entry in all_entries:
         label, path, group, variant = parse_entry(entry)
         rows.append(build_row(label=label, path=path, group=group, variant=variant))
 

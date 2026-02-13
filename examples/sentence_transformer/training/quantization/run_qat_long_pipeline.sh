@@ -95,7 +95,7 @@ run_or_resume() {
   fi
 
   echo "[RUN] ${tag}" >&2
-  bash "${RUN_FALLBACK_SCRIPT}" "${tag}" "$@"
+  bash "${RUN_FALLBACK_SCRIPT}" "${tag}" "$@" >&2
   local latest
   latest="$(latest_result_for_tag "${tag}")"
   if [[ -z "${latest}" ]]; then
@@ -120,17 +120,11 @@ collect_from_tsv() {
   local tsv_path="$2"
   local output_md="$3"
   local output_json="$4"
-  local -a entry_args
-  entry_args=()
-  while IFS=$'\t' read -r label path group variant; do
-    [[ -z "${label}" ]] && continue
-    entry_args+=(--entry "${label}|${path}|${group}|${variant}")
-  done <"${tsv_path}"
   uv run python "${COLLECT_SCRIPT}" \
     --title "${title}" \
     --output-md "${output_md}" \
     --output-json "${output_json}" \
-    "${entry_args[@]}"
+    --entries-file "${tsv_path}"
 }
 
 pick_best_stage2_variant() {

@@ -109,6 +109,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--skip-train", action="store_true")
     parser.add_argument("--eval-during-train", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument(
+        "--eval-every-train-samples",
+        type=int,
+        default=0,
+        help="If > 0 and --eval-during-train is enabled, run evaluation every N seen train samples (approx.).",
+    )
     parser.add_argument("--save-final-model", action=argparse.BooleanOptionalAction, default=True)
     return parser.parse_args()
 
@@ -368,6 +374,21 @@ def main() -> None:
         else:
             loss = base_loss
 
+        eval_steps_effective: float | int | None = None
+        eval_samples_effective: int | None = None
+        if args.eval_during_train:
+            if args.eval_every_train_samples > 0:
+                eval_steps_effective = max(1, round(args.eval_every_train_samples / args.train_batch_size))
+                eval_samples_effective = eval_steps_effective * args.train_batch_size
+                logger.info(
+                    "Eval during train: eval_steps=%d (~%d train samples between evals)",
+                    eval_steps_effective,
+                    eval_samples_effective,
+                )
+            else:
+                eval_steps_effective = 0.1
+                logger.info("Eval during train: eval_steps=0.1 (10%% of total train steps)")
+
         training_args = SentenceTransformerTrainingArguments(
             output_dir=str(output_dir),
             num_train_epochs=args.num_epochs,
@@ -379,9 +400,9 @@ def main() -> None:
             bf16=args.bf16,
             batch_sampler=BatchSamplers.NO_DUPLICATES,
             eval_strategy="steps" if args.eval_during_train else "no",
-            eval_steps=0.1 if args.eval_during_train else None,
+            eval_steps=eval_steps_effective if args.eval_during_train else None,
             save_strategy="steps" if args.eval_during_train else "no",
-            save_steps=0.1 if args.eval_during_train else None,
+            save_steps=eval_steps_effective if args.eval_during_train else None,
             save_total_limit=2 if args.eval_during_train else None,
             logging_steps=0.025,
             logging_first_step=True,
@@ -397,11 +418,22 @@ def main() -> None:
             evaluator=evaluator if args.eval_during_train else None,
         )
         trainer.train()
+        during_train_eval_history = None
+        if args.eval_during_train:
+            during_train_eval_history = [
+                log_entry
+                for log_entry in trainer.state.log_history
+                if isinstance(log_entry, dict) and any(key.startswith("eval_") for key in log_entry.keys())
+            ]
+            logger.info("Collected %d eval points during training", len(during_train_eval_history))
         logger.info("Evaluating after training")
         post_metrics = evaluator(model)
     else:
         logger.info("Skipping training; reusing pre-training metrics as post-training metrics")
         post_metrics = pre_metrics
+        eval_steps_effective = None
+        eval_samples_effective = None
+        during_train_eval_history = None
 
     if args.save_final_model and not args.skip_train:
         model.save_pretrained(str(final_output_dir))
@@ -458,6 +490,10 @@ def main() -> None:
             "train_precision_warmup_steps": precision_warmup_steps,
             "skip_train": args.skip_train,
             "eval_during_train": args.eval_during_train,
+            "eval_every_train_samples": args.eval_every_train_samples,
+            "eval_steps_effective": eval_steps_effective,
+            "eval_samples_effective": eval_samples_effective,
+            "during_train_eval_history": during_train_eval_history,
         },
     )
     write_results(summary, Path(args.results_dir))
