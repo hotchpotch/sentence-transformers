@@ -18,6 +18,7 @@ import argparse
 import json
 import logging
 import random
+import re
 import traceback
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -32,7 +33,7 @@ from sentence_transformers import (
     SentenceTransformerTrainingArguments,
     losses,
 )
-from sentence_transformers.evaluation import InformationRetrievalEvaluator, SequentialEvaluator
+from sentence_transformers.evaluation import InformationRetrievalEvaluator, NanoBEIREvaluator, SequentialEvaluator
 from sentence_transformers.losses.MultipleNegativesRankingLoss import MultipleNegativesRankingLoss
 from sentence_transformers.training_args import BatchSamplers
 
@@ -66,6 +67,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-name", default="microsoft/mpnet-base")
     parser.add_argument("--experiment-name", required=True)
+    parser.add_argument("--train-loss", choices=["qat", "mnrl"], default="qat")
     parser.add_argument("--seed", type=int, default=12)
     parser.add_argument("--num-train-samples", type=int, default=100_000)
     parser.add_argument("--num-eval-samples", type=int, default=10_000)
@@ -77,6 +79,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--fp16", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--output-root", default="examples/sentence_transformer/training/quantization/models")
     parser.add_argument("--results-dir", default="qat_eval_results")
+    parser.add_argument("--eval-benchmark", choices=["gooaq-dev", "nanobeir"], default="gooaq-dev")
     parser.add_argument("--eval-quantization-mode", choices=["legacy", "evaluator"], default="legacy")
     parser.add_argument("--eval-calibration-size", type=int, default=1024)
     parser.add_argument(
@@ -85,7 +88,11 @@ def parse_args() -> argparse.Namespace:
         default="zero_one",
     )
     parser.add_argument("--eval-dequantize", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--eval-quantize-queries", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--eval-precisions", default="float32,int8,binary")
+    parser.add_argument("--nanobeir-dataset-id", default="sentence-transformers/NanoBEIR-en")
+    parser.add_argument("--nanobeir-dataset-names", default="msmarco,nq")
+    parser.add_argument("--nanobeir-batch-size", type=int, default=32)
     parser.add_argument("--train-precisions", default="float32,int8,binary")
     parser.add_argument("--quantization-weights", default="1.0,1.0,0.5")
     parser.add_argument("--train-binary-mode", choices=["signed", "unsigned"], default="unsigned")
@@ -93,6 +100,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--train-int8-range-momentum", type=float, default=0.99)
     parser.add_argument("--train-quantization-warmup-steps", type=int, default=200)
     parser.add_argument("--skip-train", action="store_true")
+    parser.add_argument("--eval-during-train", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--save-final-model", action=argparse.BooleanOptionalAction, default=True)
     return parser.parse_args()
 
@@ -101,7 +109,7 @@ def parse_csv_list(text: str, cast):
     return [cast(item.strip()) for item in text.split(",") if item.strip()]
 
 
-def create_evaluator(
+def create_gooaq_evaluator(
     eval_dataset: Dataset,
     full_dataset: Dataset,
     eval_precisions: list[str],
@@ -109,6 +117,7 @@ def create_evaluator(
     eval_calibration_size: int,
     eval_binary_reconstruction: str,
     eval_dequantize: bool,
+    eval_quantize_queries: bool,
 ) -> SequentialEvaluator:
     random.seed(12)
     queries = dict(zip(eval_dataset["id"], eval_dataset["question"]))
@@ -129,18 +138,65 @@ def create_evaluator(
                 quantization_calibration_size=eval_calibration_size,
                 quantization_dequantize=eval_dequantize,
                 binary_reconstruction=eval_binary_reconstruction,
+                quantize_queries=eval_quantize_queries,
             )
         )
 
     return SequentialEvaluator(evaluators, main_score_function=lambda scores: scores[0])
 
 
-def extract_ndcg10(metrics: dict[str, float], eval_precisions: list[str]) -> dict[str, float]:
+def create_nanobeir_evaluator(
+    eval_precisions: list[str],
+    dataset_id: str,
+    dataset_names: list[str],
+    batch_size: int,
+    quantize_queries: bool,
+) -> SequentialEvaluator:
+    evaluators = []
+    for precision in eval_precisions:
+        evaluators.append(
+            NanoBEIREvaluator(
+                dataset_names=dataset_names,
+                dataset_id=dataset_id,
+                batch_size=batch_size,
+                show_progress_bar=True,
+                write_csv=False,
+                precision=precision,
+                quantize_queries=quantize_queries,
+            )
+        )
+    return SequentialEvaluator(evaluators, main_score_function=lambda scores: scores[0])
+
+
+def extract_ndcg10(metrics: dict[str, float], eval_precisions: list[str], eval_benchmark: str) -> dict[str, float]:
     out = {}
     for precision in eval_precisions:
-        key = f"gooaq-dev-{precision}_cosine_ndcg@10"
-        if key in metrics:
-            out[precision] = float(metrics[key])
+        candidates = []
+        if eval_benchmark == "gooaq-dev":
+            candidates.append(f"gooaq-dev-{precision}_cosine_ndcg@10")
+        elif eval_benchmark == "nanobeir":
+            candidates.extend(
+                [
+                    f"NanoBEIR_mean_{precision}_{precision}_cosine_ndcg@10",
+                    f"NanoBEIR_mean_{precision}_cosine_ndcg@10",
+                ]
+            )
+
+        value = None
+        for key in candidates:
+            if key in metrics:
+                value = float(metrics[key])
+                break
+
+        if value is None and eval_benchmark == "nanobeir":
+            pattern = re.compile(rf"^NanoBEIR_mean.*{precision}_cosine_ndcg@10$")
+            for key, metric_value in metrics.items():
+                if pattern.match(key):
+                    value = float(metric_value)
+                    break
+
+        if value is not None:
+            out[precision] = value
     return out
 
 
@@ -225,15 +281,25 @@ def main() -> None:
     logger.info("Train dataset size: %d", len(train_dataset))
     logger.info("Eval dataset size: %d", len(eval_dataset))
 
-    evaluator = create_evaluator(
-        eval_dataset=eval_dataset,
-        full_dataset=dataset,
-        eval_precisions=eval_precisions,
-        eval_quantization_mode=args.eval_quantization_mode,
-        eval_calibration_size=args.eval_calibration_size,
-        eval_binary_reconstruction=args.eval_binary_reconstruction,
-        eval_dequantize=args.eval_dequantize,
-    )
+    if args.eval_benchmark == "gooaq-dev":
+        evaluator = create_gooaq_evaluator(
+            eval_dataset=eval_dataset,
+            full_dataset=dataset,
+            eval_precisions=eval_precisions,
+            eval_quantization_mode=args.eval_quantization_mode,
+            eval_calibration_size=args.eval_calibration_size,
+            eval_binary_reconstruction=args.eval_binary_reconstruction,
+            eval_dequantize=args.eval_dequantize,
+            eval_quantize_queries=args.eval_quantize_queries,
+        )
+    else:
+        evaluator = create_nanobeir_evaluator(
+            eval_precisions=eval_precisions,
+            dataset_id=args.nanobeir_dataset_id,
+            dataset_names=parse_csv_list(args.nanobeir_dataset_names, str),
+            batch_size=args.nanobeir_batch_size,
+            quantize_queries=args.eval_quantize_queries,
+        )
 
     logger.info("Evaluating before training")
     pre_metrics = evaluator(model)
@@ -241,16 +307,19 @@ def main() -> None:
     if not args.skip_train:
         logger.info("Starting training")
         base_loss = MultipleNegativesRankingLoss(model)
-        loss = losses.QuantizationAwareLoss(
-            model=model,
-            loss=base_loss,
-            quantization_precisions=train_precisions,
-            quantization_weights=quantization_weights,
-            binary_mode=args.train_binary_mode,
-            use_int8_range_state=args.train_use_int8_range_state,
-            int8_range_momentum=args.train_int8_range_momentum,
-            quantization_warmup_steps=args.train_quantization_warmup_steps,
-        )
+        if args.train_loss == "qat":
+            loss = losses.QuantizationAwareLoss(
+                model=model,
+                loss=base_loss,
+                quantization_precisions=train_precisions,
+                quantization_weights=quantization_weights,
+                binary_mode=args.train_binary_mode,
+                use_int8_range_state=args.train_use_int8_range_state,
+                int8_range_momentum=args.train_int8_range_momentum,
+                quantization_warmup_steps=args.train_quantization_warmup_steps,
+            )
+        else:
+            loss = base_loss
 
         training_args = SentenceTransformerTrainingArguments(
             output_dir=str(output_dir),
@@ -262,11 +331,11 @@ def main() -> None:
             fp16=args.fp16,
             bf16=args.bf16,
             batch_sampler=BatchSamplers.NO_DUPLICATES,
-            eval_strategy="steps",
-            eval_steps=0.1,
-            save_strategy="steps",
-            save_steps=0.1,
-            save_total_limit=2,
+            eval_strategy="steps" if args.eval_during_train else "no",
+            eval_steps=0.1 if args.eval_during_train else None,
+            save_strategy="steps" if args.eval_during_train else "no",
+            save_steps=0.1 if args.eval_during_train else None,
+            save_total_limit=2 if args.eval_during_train else None,
             logging_steps=0.025,
             logging_first_step=True,
             run_name=run_name,
@@ -276,22 +345,26 @@ def main() -> None:
             model=model,
             args=training_args,
             train_dataset=train_dataset.remove_columns("id"),
-            eval_dataset=eval_dataset.remove_columns("id"),
+            eval_dataset=eval_dataset.remove_columns("id") if args.eval_during_train else None,
             loss=loss,
-            evaluator=evaluator,
+            evaluator=evaluator if args.eval_during_train else None,
         )
         trainer.train()
-
-    logger.info("Evaluating after training")
-    post_metrics = evaluator(model)
+        logger.info("Evaluating after training")
+        post_metrics = evaluator(model)
+    else:
+        logger.info("Skipping training; reusing pre-training metrics as post-training metrics")
+        post_metrics = pre_metrics
 
     if args.save_final_model and not args.skip_train:
         model.save_pretrained(str(final_output_dir))
         logger.info("Saved model to: %s", final_output_dir)
 
-    target_ndcg10 = {k: v for k, v in TARGET_NDCG10.items() if k in eval_precisions}
-    pre_ndcg10 = extract_ndcg10(pre_metrics, eval_precisions)
-    post_ndcg10 = extract_ndcg10(post_metrics, eval_precisions)
+    target_ndcg10 = (
+        {k: v for k, v in TARGET_NDCG10.items() if k in eval_precisions} if args.eval_benchmark == "gooaq-dev" else {}
+    )
+    pre_ndcg10 = extract_ndcg10(pre_metrics, eval_precisions, args.eval_benchmark)
+    post_ndcg10 = extract_ndcg10(post_metrics, eval_precisions, args.eval_benchmark)
     post_delta_vs_target = {k: post_ndcg10[k] - target_ndcg10[k] for k in target_ndcg10.keys() if k in post_ndcg10}
 
     summary = RunSummary(
@@ -307,6 +380,7 @@ def main() -> None:
         post_delta_vs_target=post_delta_vs_target,
         config={
             "seed": args.seed,
+            "train_loss": args.train_loss,
             "num_train_samples": args.num_train_samples,
             "num_eval_samples": args.num_eval_samples,
             "train_batch_size": args.train_batch_size,
@@ -315,10 +389,15 @@ def main() -> None:
             "warmup_ratio": args.warmup_ratio,
             "fp16": args.fp16,
             "bf16": args.bf16,
+            "eval_benchmark": args.eval_benchmark,
             "eval_quantization_mode": args.eval_quantization_mode,
             "eval_calibration_size": args.eval_calibration_size,
             "eval_binary_reconstruction": args.eval_binary_reconstruction,
             "eval_dequantize": args.eval_dequantize,
+            "eval_quantize_queries": args.eval_quantize_queries,
+            "nanobeir_dataset_id": args.nanobeir_dataset_id,
+            "nanobeir_dataset_names": parse_csv_list(args.nanobeir_dataset_names, str),
+            "nanobeir_batch_size": args.nanobeir_batch_size,
             "train_precisions": train_precisions,
             "eval_precisions": eval_precisions,
             "quantization_weights": quantization_weights,
@@ -327,6 +406,7 @@ def main() -> None:
             "train_int8_range_momentum": args.train_int8_range_momentum,
             "train_quantization_warmup_steps": args.train_quantization_warmup_steps,
             "skip_train": args.skip_train,
+            "eval_during_train": args.eval_during_train,
         },
     )
     write_results(summary, Path(args.results_dir))

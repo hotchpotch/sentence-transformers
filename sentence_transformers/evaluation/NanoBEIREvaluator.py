@@ -231,6 +231,7 @@ class NanoBEIREvaluator(SentenceEvaluator):
         corpus_prompts: str | dict[str, str] | None = None,
         write_predictions: bool = False,
         precision: str = "float32",
+        quantize_queries: bool = True,
     ):
         super().__init__()
         if dataset_names is None:
@@ -249,6 +250,7 @@ class NanoBEIREvaluator(SentenceEvaluator):
         self.main_score_function = main_score_function
         self.truncate_dim = truncate_dim
         self.precision = precision
+        self.quantize_queries = quantize_queries
         self.name = f"NanoBEIR_{aggregate_key}"
         if self.truncate_dim:
             self.name += f"_{self.truncate_dim}"
@@ -278,6 +280,7 @@ class NanoBEIREvaluator(SentenceEvaluator):
             "main_score_function": main_score_function,
             "write_predictions": write_predictions,
             "precision": self.precision,
+            "quantize_queries": self.quantize_queries,
         }
         self.evaluators = [
             self._load_dataset(name, **ir_evaluator_kwargs)

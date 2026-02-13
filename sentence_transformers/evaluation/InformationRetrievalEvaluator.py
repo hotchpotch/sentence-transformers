@@ -154,6 +154,7 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
         quantization_ranges: np.ndarray | None = None,
         quantization_dequantize: bool = True,
         binary_reconstruction: Literal["zero_one", "minus_one_one"] = "zero_one",
+        quantize_queries: bool = True,
     ) -> None:
         super().__init__()
         self.queries_ids = []
@@ -193,6 +194,7 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
         self.quantization_ranges = quantization_ranges
         self.quantization_dequantize = quantization_dequantize
         self.binary_reconstruction = binary_reconstruction
+        self.quantize_queries = quantize_queries
 
         if name:
             name = "_" + name
@@ -341,7 +343,7 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
             prompt=self.query_prompt,
         )
 
-        if self._use_evaluator_quantization:
+        if self._use_evaluator_quantization and self.quantize_queries:
             query_embeddings = self._quantize_and_convert(query_embeddings, ranges=quantization_ranges)
         else:
             # Convert quantized embeddings to float32 for similarity computations
@@ -376,6 +378,8 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
 
             # Compute cosine similarites
             for name, score_function in self.score_functions.items():
+                if query_embeddings.device != sub_corpus_embeddings.device:
+                    sub_corpus_embeddings = sub_corpus_embeddings.to(query_embeddings.device)
                 pair_scores = score_function(query_embeddings, sub_corpus_embeddings)
 
                 # Get top-k values
@@ -454,6 +458,8 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
     ) -> np.ndarray:
         precision = self.precision
         if self._use_evaluator_quantization:
+            precision = "float32"
+        if encode_fn_name == "query" and not self.quantize_queries:
             precision = "float32"
 
         if encode_fn_name is None:
@@ -543,7 +549,7 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
             # Convert from signed int8 to unsigned uint8
             embeddings = embeddings.cpu()
             embeddings_np = embeddings.numpy()
-            embeddings_np = (embeddings_np + 128).astype(np.uint8)
+            embeddings_np = (embeddings_np.astype(np.int16) + 128).astype(np.uint8)
             embeddings_np = np.unpackbits(embeddings_np, axis=1)
             if self.binary_reconstruction == "minus_one_one":
                 embeddings_np = embeddings_np.astype(np.float32) * 2 - 1
