@@ -1,0 +1,59 @@
+{
+  "baseline_run": "mpnet-base-gooaq-qat-local-baseline-mnrl-nanobeir-card-s42-20260213-205633",
+  "candidate_config": {
+    "seed": 42,
+    "train_binary_mode": "signed",
+    "train_int8_range_momentum": 0.99,
+    "train_loss": "qat",
+    "train_precision_warmup_steps": [
+      0,
+      200,
+      1200
+    ],
+    "train_quantization_warmup_steps": 0,
+    "train_use_int8_range_state": true
+  },
+  "candidate_run": "mpnet-base-gooaq-qat-step5-cache-isolation-trainB-ema-warmup-20260213-213929",
+  "change_summary": "ForwardDecorator cache is now copied per precision pass to avoid mutating float32 cache between quantization passes.",
+  "delta": {
+    "vs_baseline": {
+      "binary": 0.010602934349364546,
+      "float32": -0.011543057359623465,
+      "int8": -0.007671944532025132
+    },
+    "vs_step4b": {
+      "binary": -0.015383851476300614,
+      "float32": -0.0020133250801561697,
+      "int8": -0.009309293918452588
+    },
+    "vs_trainB": {
+      "binary": -0.0061034875462860905,
+      "float32": -0.0024943127008801858,
+      "int8": 0.007818903469041794
+    }
+  },
+  "ndcg10": {
+    "baseline": {
+      "binary": 0.4772903910172228,
+      "float32": 0.5295846675042574,
+      "int8": 0.5148909762541771
+    },
+    "candidate": {
+      "binary": 0.48789332536658736,
+      "float32": 0.5180416101446339,
+      "int8": 0.507219031722152
+    },
+    "step4b": {
+      "binary": 0.503277176842888,
+      "float32": 0.5200549352247901,
+      "int8": 0.5165283256406046
+    },
+    "trainB": {
+      "binary": 0.49399681291287345,
+      "float32": 0.5205359228455141,
+      "int8": 0.4994001282531102
+    }
+  },
+  "step4b_run": "mpnet-base-gooaq-qat-step4b-trainB-ema-per-precision-warmup-20260213-213450",
+  "trainB_run": "mpnet-base-gooaq-qat-local-trainB-qat-nanobeir-card-s42-20260213-205935"
+}

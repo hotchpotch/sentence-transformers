@@ -5,6 +5,7 @@ import torch
 import pytest
 
 from sentence_transformers.losses.QuantizationAwareLoss import (
+    ForwardDecorator,
     quantize_embeddings_torch,
     resolve_warmup_steps_by_precision,
 )
@@ -84,3 +85,37 @@ def test_resolve_warmup_steps_by_precision_rejects_negative_warmup():
             quantization_warmup_steps=200,
             quantization_warmup_steps_by_precision={"int8": -1},
         )
+
+
+def test_forward_decorator_keeps_cache_float32_across_precisions():
+    base_embedding = torch.tensor(
+        [
+            [0.0, 0.0],
+            [1.1, 1.1],
+            [2.0, 2.0],
+        ]
+    )
+
+    def forward_fn(_features):
+        return {"sentence_embedding": base_embedding.clone()}
+
+    decorator = ForwardDecorator(forward_fn)
+    decorator.start_caching()
+    decorator.set_precision(None)
+    _ = decorator({})
+    cached_before = decorator.cache[0]["sentence_embedding"].clone()
+
+    decorator.use_cache()
+    decorator.set_precision("int8")
+    _ = decorator({})
+
+    # int8 pass must not mutate cached float32 embeddings.
+    assert torch.allclose(decorator.cache[0]["sentence_embedding"], cached_before)
+
+    decorator.use_cache()
+    decorator.set_precision("binary")
+    binary_output = decorator({})["sentence_embedding"]
+    expected_binary = quantize_embeddings_torch(cached_before, precision="binary", binary_mode="unsigned")
+
+    # Binary pass should quantize from original float32 cache, not int8-mutated values.
+    assert torch.equal(binary_output, expected_binary)
