@@ -14,17 +14,25 @@ fi
 
 if [[ -n "${WAIT_PID}" ]]; then
   echo "[WAIT] Waiting for pid=${WAIT_PID} to finish..."
-  while kill -0 "${WAIT_PID}" 2>/dev/null; do
-    sleep 30
+  while true; do
+    if kill -0 "${WAIT_PID}" 2>/dev/null; then
+      sleep 30
+      continue
+    fi
+    break
   done
   echo "[WAIT] pid=${WAIT_PID} finished."
 fi
 
 echo "[WAIT] Waiting for current ${CURRENT_TAG_PREFIX} runs to finish..."
-while pgrep -f "train_qat_gooaq_ablation.py.*--experiment-name ${CURRENT_TAG_PREFIX}-" >/dev/null 2>&1 || \
-  pgrep -f "run_qat_with_batch_fallback.sh ${CURRENT_TAG_PREFIX}-" >/dev/null 2>&1 || \
-  pgrep -f "run_trainb_1m_research_rounds.sh" >/dev/null 2>&1; do
-  sleep 60
+while true; do
+  if pgrep -f "train_qat_gooaq_ablation.py.*--experiment-name ${CURRENT_TAG_PREFIX}-" >/dev/null 2>&1 || \
+    pgrep -f "run_qat_with_batch_fallback.sh ${CURRENT_TAG_PREFIX}-" >/dev/null 2>&1 || \
+    pgrep -f "run_trainb_1m_research_rounds.sh" >/dev/null 2>&1; then
+    sleep 60
+    continue
+  fi
+  break
 done
 
 echo "[START] Launching mmBERT flash_attention_2 3M/1epoch research cycle"
@@ -43,4 +51,3 @@ RUNS_TSV="tmp/mmbert3mfa2_research_runs.tsv" \
 REPORT_MD="qat_3M_mmbert_flash2_research_report.md" \
 REPORT_JSON="qat_eval_results/qat_3M_mmbert_flash2_research_report.json" \
 bash "${RUNNER_SCRIPT}"
-
