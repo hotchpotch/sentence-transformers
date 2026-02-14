@@ -14,12 +14,31 @@ fi
 mkdir -p tmp/qat_1m_logs
 mkdir -p qat_eval_results
 
-# Keep this research cycle fixed at bs=128 unless explicitly overridden by env.
+is_true() {
+  local v="${1:-}"
+  case "${v,,}" in
+    1|true|yes|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+TAG_PREFIX="${TAG_PREFIX:-trainb1m}"
+MODEL_NAME="${MODEL_NAME:-microsoft/mpnet-base}"
+SEED="${SEED:-42}"
+NUM_TRAIN_SAMPLES="${NUM_TRAIN_SAMPLES:-1000000}"
+NUM_EVAL_SAMPLES="${NUM_EVAL_SAMPLES:-10000}"
+NUM_EPOCHS="${NUM_EPOCHS:-1.0}"
+EVAL_EVERY_TRAIN_SAMPLES="${EVAL_EVERY_TRAIN_SAMPLES:-100000}"
+ATTN_IMPLEMENTATION="${ATTN_IMPLEMENTATION:-}"
+ATTN_FALLBACK="${ATTN_FALLBACK:-true}"
+TRUST_REMOTE_CODE="${TRUST_REMOTE_CODE:-false}"
+
+# Keep this research cycle fixed at bs=128 unless explicitly overridden.
 export BATCH_SIZES="${BATCH_SIZES:-128}"
 
-RUNS_TSV="${RUNS_TSV:-tmp/trainb_1m_research_runs.tsv}"
-REPORT_MD="${REPORT_MD:-qat_1M_trainb_research_report.md}"
-REPORT_JSON="${REPORT_JSON:-qat_eval_results/qat_1M_trainb_research_report.json}"
+RUNS_TSV="${RUNS_TSV:-tmp/${TAG_PREFIX}_research_runs.tsv}"
+REPORT_MD="${REPORT_MD:-qat_${TAG_PREFIX}_research_report.md}"
+REPORT_JSON="${REPORT_JSON:-qat_eval_results/qat_${TAG_PREFIX}_research_report.json}"
 
 >"${RUNS_TSV}"
 
@@ -28,20 +47,32 @@ latest_result_for_tag() {
   ls -1t "qat_eval_results"/*-gooaq-qat-"${tag}"-bs*.json 2>/dev/null | head -n 1 || true
 }
 
-latest_baseline_json() {
+latest_baseline_json_for_prefix() {
+  local pref="$1"
+  latest_result_for_tag "${pref}-r1-baseline-mnrl"
+}
+
+resolve_baseline_json() {
+  local current
+  current="$(latest_baseline_json_for_prefix "${TAG_PREFIX}")"
+  if [[ -n "${current}" && -f "${current}" ]]; then
+    printf '%s\n' "${current}"
+    return 0
+  fi
+
+  if [[ -n "${BASELINE_JSON:-}" && -f "${BASELINE_JSON}" ]]; then
+    printf '%s\n' "${BASELINE_JSON}"
+    return 0
+  fi
+
   local pinned="qat_eval_results/mpnet-base-gooaq-qat-1m-cycle2-e100k-baseline_mnrl-bs128-20260214-065505.json"
   if [[ -f "${pinned}" ]]; then
     printf '%s\n' "${pinned}"
     return 0
   fi
-  ls -1t qat_eval_results/*1m*baseline*mnrl*.json 2>/dev/null | head -n 1 || true
-}
 
-BASELINE_JSON="${BASELINE_JSON:-$(latest_baseline_json)}"
-if [[ -z "${BASELINE_JSON}" || ! -f "${BASELINE_JSON}" ]]; then
-  echo "[ERROR] Could not find baseline json. Set BASELINE_JSON=/path/to/file.json" >&2
-  exit 1
-fi
+  ls -1t qat_eval_results/*baseline*mnrl*.json 2>/dev/null | head -n 1 || true
+}
 
 build_profile_args() {
   local profile="$1"
@@ -169,56 +200,82 @@ record_result() {
 }
 
 refresh_report() {
+  local baseline_json
+  baseline_json="$(resolve_baseline_json)"
+  if [[ -z "${baseline_json}" || ! -f "${baseline_json}" ]]; then
+    echo "[WARN] Baseline json is not available yet; skipping report refresh." >&2
+    return 0
+  fi
   uv run python "${SUMMARY_SCRIPT}" \
     --tsv "${RUNS_TSV}" \
-    --baseline-json "${BASELINE_JSON}" \
+    --baseline-json "${baseline_json}" \
     --output-md "${REPORT_MD}" \
     --output-json "${REPORT_JSON}"
 }
 
 declare -a RUN_MATRIX=(
-  "Round1|Baseline (MNRL)|trainb1m-r1-baseline-mnrl|baseline_mnrl"
-  "Round1|TrainB Control|trainb1m-r1-trainb-control|trainB_control"
-  "Round1|Step4b Ref|trainb1m-r1-step4b|trainB_step4b"
-  "Round1|Warmup1800|trainb1m-r1-warmup1800|warmup_1800"
-  "Round1|Warmup2400|trainb1m-r1-warmup2400|warmup_2400"
-  "Round1|BinWeight0.25|trainb1m-r1-binw025|binw_025"
-  "Round1|BinWeight0.20|trainb1m-r1-binw020|binw_020"
-  "Round1|Int8Mom0.995|trainb1m-r1-int8mom0995|int8mom_0995"
-  "Round2|Baseline (MNRL)|trainb1m-r2-baseline-mnrl|baseline_mnrl"
-  "Round2|Warmup3200|trainb1m-r2-warmup3200|warmup_3200"
-  "Round2|BinWeight0.15|trainb1m-r2-binw015|binw_015"
-  "Round2|QWarmup100|trainb1m-r2-qwarm100|qwarm_100"
-  "Round2|QWarmup400|trainb1m-r2-qwarm400|qwarm_400"
-  "Round2|LR1e-5|trainb1m-r2-lr1e5|lr_1e5"
-  "Round2|LR1.5e-5|trainb1m-r2-lr15e5|lr_15e5"
-  "Round3|Baseline (MNRL)|trainb1m-r3-baseline-mnrl|baseline_mnrl"
-  "Round3|BinWeight0.30|trainb1m-r3-binw030|binw_030"
-  "Round3|BinWeight0.35|trainb1m-r3-binw035|binw_035"
-  "Round3|Int8Mom0.997|trainb1m-r3-int8mom0997|int8mom_0997"
-  "Round3|Int8Mom0.98|trainb1m-r3-int8mom0980|int8mom_0980"
-  "Round3|WarmupRatio0.05|trainb1m-r3-warmupratio005|warmup_ratio_005"
-  "Round3|WarmupRatio0.20|trainb1m-r3-warmupratio020|warmup_ratio_020"
-  "Round3|AsymEvalDocsOnly|trainb1m-r3-asymdocs|asym_eval_docs_only"
-  "Round3|CombinedA|trainb1m-r3-combined-a|combined_a"
-  "Round3|CombinedB|trainb1m-r3-combined-b|combined_b"
-  "Round3|CombinedC|trainb1m-r3-combined-c|combined_c"
+  "Round1|Baseline (MNRL)|r1-baseline-mnrl|baseline_mnrl"
+  "Round1|TrainB Control|r1-trainb-control|trainB_control"
+  "Round1|Step4b Ref|r1-step4b|trainB_step4b"
+  "Round1|Warmup1800|r1-warmup1800|warmup_1800"
+  "Round1|Warmup2400|r1-warmup2400|warmup_2400"
+  "Round1|BinWeight0.25|r1-binw025|binw_025"
+  "Round1|BinWeight0.20|r1-binw020|binw_020"
+  "Round1|Int8Mom0.995|r1-int8mom0995|int8mom_0995"
+  "Round2|Baseline (MNRL)|r2-baseline-mnrl|baseline_mnrl"
+  "Round2|Warmup3200|r2-warmup3200|warmup_3200"
+  "Round2|BinWeight0.15|r2-binw015|binw_015"
+  "Round2|QWarmup100|r2-qwarm100|qwarm_100"
+  "Round2|QWarmup400|r2-qwarm400|qwarm_400"
+  "Round2|LR1e-5|r2-lr1e5|lr_1e5"
+  "Round2|LR1.5e-5|r2-lr15e5|lr_15e5"
+  "Round3|Baseline (MNRL)|r3-baseline-mnrl|baseline_mnrl"
+  "Round3|BinWeight0.30|r3-binw030|binw_030"
+  "Round3|BinWeight0.35|r3-binw035|binw_035"
+  "Round3|Int8Mom0.997|r3-int8mom0997|int8mom_0997"
+  "Round3|Int8Mom0.98|r3-int8mom0980|int8mom_0980"
+  "Round3|WarmupRatio0.05|r3-warmupratio005|warmup_ratio_005"
+  "Round3|WarmupRatio0.20|r3-warmupratio020|warmup_ratio_020"
+  "Round3|AsymEvalDocsOnly|r3-asymdocs|asym_eval_docs_only"
+  "Round3|CombinedA|r3-combined-a|combined_a"
+  "Round3|CombinedB|r3-combined-b|combined_b"
+  "Round3|CombinedC|r3-combined-c|combined_c"
 )
 
 common_args=(
+  --model-name "${MODEL_NAME}"
+  --seed "${SEED}"
+  --num-train-samples "${NUM_TRAIN_SAMPLES}"
+  --num-eval-samples "${NUM_EVAL_SAMPLES}"
+  --num-epochs "${NUM_EPOCHS}"
   --eval-benchmark nanobeir
-  --seed 42
-  --num-train-samples 1000000
-  --num-eval-samples 10000
   --eval-during-train
-  --eval-every-train-samples 100000
+  --eval-every-train-samples "${EVAL_EVERY_TRAIN_SAMPLES}"
 )
 
-echo "[INFO] baseline json: ${BASELINE_JSON}"
+if [[ -n "${ATTN_IMPLEMENTATION}" ]]; then
+  common_args+=(--attn-implementation "${ATTN_IMPLEMENTATION}")
+fi
+if is_true "${ATTN_FALLBACK}"; then
+  common_args+=(--attn-fallback)
+else
+  common_args+=(--no-attn-fallback)
+fi
+if is_true "${TRUST_REMOTE_CODE}"; then
+  common_args+=(--trust-remote-code)
+else
+  common_args+=(--no-trust-remote-code)
+fi
+
+echo "[INFO] tag prefix: ${TAG_PREFIX}"
+echo "[INFO] model: ${MODEL_NAME}"
+echo "[INFO] samples/epochs: ${NUM_TRAIN_SAMPLES}/${NUM_EPOCHS}"
+echo "[INFO] attn: ${ATTN_IMPLEMENTATION:-default} (fallback=${ATTN_FALLBACK})"
 echo "[INFO] planned runs: ${#RUN_MATRIX[@]}"
 
 for row in "${RUN_MATRIX[@]}"; do
-  IFS='|' read -r round label tag profile <<<"${row}"
+  IFS='|' read -r round label tag_suffix profile <<<"${row}"
+  tag="${TAG_PREFIX}-${tag_suffix}"
   extra_args="$(build_profile_args "${profile}")"
   # shellcheck disable=SC2206
   profile_args=( ${extra_args} )

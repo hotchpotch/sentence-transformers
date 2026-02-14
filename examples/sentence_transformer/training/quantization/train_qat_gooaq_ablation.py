@@ -66,6 +66,13 @@ class RunSummary:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-name", default="microsoft/mpnet-base")
+    parser.add_argument(
+        "--attn-implementation",
+        default="",
+        help="Optional attention implementation for model loading, e.g. flash_attention_2 or sdpa.",
+    )
+    parser.add_argument("--attn-fallback", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--trust-remote-code", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--experiment-name", required=True)
     parser.add_argument("--train-loss", choices=["qat", "mnrl"], default="qat")
     parser.add_argument("--seed", type=int, default=12)
@@ -238,6 +245,41 @@ def sanitize_name(name: str) -> str:
     return name.replace("/", "-")
 
 
+def load_sentence_transformer_model(
+    model_name: str,
+    model_card_data: SentenceTransformerModelCardData,
+    attn_implementation: str | None,
+    attn_fallback: bool,
+    trust_remote_code: bool,
+) -> SentenceTransformer:
+    attn_attempts: list[tuple[str, str | None]]
+    if attn_implementation:
+        attn_attempts = [(attn_implementation, attn_implementation)]
+        if attn_fallback:
+            attn_attempts.append(("default", None))
+    else:
+        attn_attempts = [("default", None)]
+
+    last_exc: Exception | None = None
+    for attn_label, attn_value in attn_attempts:
+        try:
+            model_kwargs = {"attn_implementation": attn_value} if attn_value else None
+            model = SentenceTransformer(
+                model_name,
+                model_card_data=model_card_data,
+                model_kwargs=model_kwargs,
+                trust_remote_code=trust_remote_code,
+            )
+            logger.info("Loaded model with attn=%s", attn_label)
+            return model
+        except Exception as exc:
+            logger.warning("Failed to load model with attn=%s: %s", attn_label, exc)
+            last_exc = exc
+
+    assert last_exc is not None
+    raise last_exc
+
+
 def write_results(summary: RunSummary, results_dir: Path) -> None:
     results_dir.mkdir(parents=True, exist_ok=True)
     json_path = results_dir / f"{summary.run_name}.json"
@@ -303,15 +345,19 @@ def main() -> None:
     output_dir = Path(args.output_root) / run_name
     final_output_dir = output_dir / "final"
 
+    attn_implementation = args.attn_implementation.strip() or None
     logger.info("Run name: %s", run_name)
-    logger.info("Loading model: %s", args.model_name)
-    model = SentenceTransformer(
-        args.model_name,
+    logger.info("Loading model: %s (attn=%s)", args.model_name, attn_implementation or "default")
+    model = load_sentence_transformer_model(
+        model_name=args.model_name,
         model_card_data=SentenceTransformerModelCardData(
             language="en",
             license="apache-2.0",
             model_name=f"QAT GooAQ ablation ({args.experiment_name})",
         ),
+        attn_implementation=attn_implementation,
+        attn_fallback=args.attn_fallback,
+        trust_remote_code=args.trust_remote_code,
     )
 
     logger.info("Loading GooAQ dataset")
@@ -459,6 +505,9 @@ def main() -> None:
         post_delta_vs_target=post_delta_vs_target,
         config={
             "seed": args.seed,
+            "attn_implementation": attn_implementation,
+            "attn_fallback": args.attn_fallback,
+            "trust_remote_code": args.trust_remote_code,
             "train_loss": args.train_loss,
             "num_train_samples": args.num_train_samples,
             "num_eval_samples": args.num_eval_samples,
