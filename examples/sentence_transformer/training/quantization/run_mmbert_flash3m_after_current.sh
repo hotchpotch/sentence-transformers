@@ -38,7 +38,7 @@ done
 echo "[START] Launching mmBERT flash_attention_2 3M/1epoch research cycle"
 TAG_PREFIX="mmbert3mfa2" \
 MODEL_NAME="hotchpotch/mmBERT-L7H384-pruned" \
-NUM_TRAIN_SAMPLES="3000000" \
+NUM_TRAIN_SAMPLES="3012496" \
 NUM_EVAL_SAMPLES="10000" \
 NUM_EPOCHS="1.0" \
 SEED="42" \
