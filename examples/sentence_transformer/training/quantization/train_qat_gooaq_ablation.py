@@ -15,6 +15,7 @@ python train_qat_gooaq_ablation.py --experiment-name eval-calibrated --eval-quan
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import logging
 import random
@@ -72,6 +73,12 @@ def parse_args() -> argparse.Namespace:
         help="Optional attention implementation for model loading, e.g. flash_attention_2 or sdpa.",
     )
     parser.add_argument("--attn-fallback", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument(
+        "--disable-flash-attn-package",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Temporarily hide flash_attn from transformers package detection during model loading.",
+    )
     parser.add_argument("--trust-remote-code", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--experiment-name", required=True)
     parser.add_argument("--train-loss", choices=["qat", "mnrl"], default="qat")
@@ -245,11 +252,42 @@ def sanitize_name(name: str) -> str:
     return name.replace("/", "-")
 
 
+def is_flash_attn_binary_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return "flash_attn" in text and ("undefined symbol" in text or "importerror" in text)
+
+
+@contextlib.contextmanager
+def maybe_disable_flash_attn_package(disable: bool):
+    if not disable:
+        yield
+        return
+
+    from transformers.utils import import_utils
+
+    original = import_utils._is_package_available
+
+    def patched(package_name: str, *args, **kwargs):
+        if package_name == "flash_attn":
+            return_version = kwargs.get("return_version", False)
+            if args:
+                return_version = bool(args[0])
+            return (False, "0.0.0") if return_version else False
+        return original(package_name, *args, **kwargs)
+
+    import_utils._is_package_available = patched
+    try:
+        yield
+    finally:
+        import_utils._is_package_available = original
+
+
 def load_sentence_transformer_model(
     model_name: str,
     model_card_data: SentenceTransformerModelCardData,
     attn_implementation: str | None,
     attn_fallback: bool,
+    disable_flash_attn_package: bool,
     trust_remote_code: bool,
 ) -> SentenceTransformer:
     attn_attempts: list[tuple[str, str | None]]
@@ -264,17 +302,35 @@ def load_sentence_transformer_model(
     for attn_label, attn_value in attn_attempts:
         try:
             model_kwargs = {"attn_implementation": attn_value} if attn_value else None
-            model = SentenceTransformer(
-                model_name,
-                model_card_data=model_card_data,
-                model_kwargs=model_kwargs,
-                trust_remote_code=trust_remote_code,
-            )
+            with maybe_disable_flash_attn_package(disable_flash_attn_package):
+                model = SentenceTransformer(
+                    model_name,
+                    model_card_data=model_card_data,
+                    model_kwargs=model_kwargs,
+                    trust_remote_code=trust_remote_code,
+                )
             logger.info("Loaded model with attn=%s", attn_label)
             return model
         except Exception as exc:
             logger.warning("Failed to load model with attn=%s: %s", attn_label, exc)
             last_exc = exc
+
+    if (
+        last_exc is not None
+        and attn_fallback
+        and not disable_flash_attn_package
+        and is_flash_attn_binary_error(last_exc)
+    ):
+        logger.warning("Detected flash-attn binary mismatch; retrying with flash_attn hidden from transformers.")
+        with maybe_disable_flash_attn_package(True):
+            model = SentenceTransformer(
+                model_name,
+                model_card_data=model_card_data,
+                model_kwargs=None,
+                trust_remote_code=trust_remote_code,
+            )
+        logger.info("Loaded model with attn=default-no-flash-attn")
+        return model
 
     assert last_exc is not None
     raise last_exc
@@ -357,6 +413,7 @@ def main() -> None:
         ),
         attn_implementation=attn_implementation,
         attn_fallback=args.attn_fallback,
+        disable_flash_attn_package=args.disable_flash_attn_package,
         trust_remote_code=args.trust_remote_code,
     )
 
@@ -507,6 +564,7 @@ def main() -> None:
             "seed": args.seed,
             "attn_implementation": attn_implementation,
             "attn_fallback": args.attn_fallback,
+            "disable_flash_attn_package": args.disable_flash_attn_package,
             "trust_remote_code": args.trust_remote_code,
             "train_loss": args.train_loss,
             "num_train_samples": args.num_train_samples,

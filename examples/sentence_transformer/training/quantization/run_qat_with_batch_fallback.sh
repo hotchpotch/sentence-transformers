@@ -21,7 +21,7 @@ for bs in "${batch_sizes[@]}"; do
   echo "[START] ${run_experiment_name} (log: ${log_path})"
 
   set +e
-  uv run python examples/sentence_transformer/training/quantization/train_qat_gooaq_ablation.py \
+  uv run --no-sync python examples/sentence_transformer/training/quantization/train_qat_gooaq_ablation.py \
     --experiment-name "${run_experiment_name}" \
     --train-batch-size "${bs}" \
     "$@" 2>&1 | tee "${log_path}"

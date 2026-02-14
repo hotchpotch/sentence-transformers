@@ -32,6 +32,7 @@ EVAL_EVERY_TRAIN_SAMPLES="${EVAL_EVERY_TRAIN_SAMPLES:-100000}"
 ATTN_IMPLEMENTATION="${ATTN_IMPLEMENTATION:-}"
 ATTN_FALLBACK="${ATTN_FALLBACK:-true}"
 TRUST_REMOTE_CODE="${TRUST_REMOTE_CODE:-false}"
+DISABLE_FLASH_ATTN_PACKAGE="${DISABLE_FLASH_ATTN_PACKAGE:-false}"
 
 # Keep this research cycle fixed at bs=128 unless explicitly overridden.
 export BATCH_SIZES="${BATCH_SIZES:-128}"
@@ -206,7 +207,7 @@ refresh_report() {
     echo "[WARN] Baseline json is not available yet; skipping report refresh." >&2
     return 0
   fi
-  uv run python "${SUMMARY_SCRIPT}" \
+  uv run --no-sync python "${SUMMARY_SCRIPT}" \
     --tsv "${RUNS_TSV}" \
     --baseline-json "${baseline_json}" \
     --output-md "${REPORT_MD}" \
@@ -266,11 +267,17 @@ if is_true "${TRUST_REMOTE_CODE}"; then
 else
   common_args+=(--no-trust-remote-code)
 fi
+if is_true "${DISABLE_FLASH_ATTN_PACKAGE}"; then
+  common_args+=(--disable-flash-attn-package)
+else
+  common_args+=(--no-disable-flash-attn-package)
+fi
 
 echo "[INFO] tag prefix: ${TAG_PREFIX}"
 echo "[INFO] model: ${MODEL_NAME}"
 echo "[INFO] samples/epochs: ${NUM_TRAIN_SAMPLES}/${NUM_EPOCHS}"
 echo "[INFO] attn: ${ATTN_IMPLEMENTATION:-default} (fallback=${ATTN_FALLBACK})"
+echo "[INFO] disable_flash_attn_package: ${DISABLE_FLASH_ATTN_PACKAGE}"
 echo "[INFO] planned runs: ${#RUN_MATRIX[@]}"
 
 for row in "${RUN_MATRIX[@]}"; do
