@@ -1,0 +1,101 @@
+# QAT Improvement Plan (2026-02-15, v2)
+
+## Objective
+
+Improve quantization robustness for the current Sentence-Transformers QAT workflow (train + eval), using implementation insights from Qdrant's quantization pipeline.
+
+Primary goals:
+- Maintain strong `float32` quality.
+- Improve `int8` / `binary` robustness with reproducible evaluation.
+- Isolate which changes actually help via controlled ablations.
+
+## Baseline Repro (First Step)
+
+Before introducing new changes, re-run and verify reproducibility for the 3 reference runs (`1M`, `bs=128`):
+
+1. `MNRL baseline`
+2. `PR implementation (cache-fixed)`
+3. `Linear staged warmup`
+
+Reference scores to reproduce:
+- `MNRL baseline`: `0.5723 / 0.5641 / 0.5383`
+- `PR implementation (cache-fixed)`: `0.5646 / 0.5731 / 0.5621`
+- `Linear staged warmup`: `0.5703 / 0.5640 / 0.5457`
+
+If reproducibility differs materially, update the recorded baseline table with the newly observed scores and use those as the new control.
+
+## Qdrant-Inspired Improvement Themes
+
+Based on Qdrant internals (`qat_report.md` + source), the most relevant ideas are:
+
+1. **Search-stage quality control** via `oversampling + rescore`
+- Qdrant uses quantized preselection + optional rescoring with higher-fidelity scoring.
+- Practical implication for ST eval: evaluate quantized retrieval with explicit two-stage candidate processing, not only direct quantized similarity.
+
+2. **Robust int8 calibration** (beyond plain min/max)
+- Qdrant supports quantile-based clipping (`quantile`) to reduce outlier sensitivity.
+- Practical implication for ST eval/train: add quantile-based range calibration and compare against minmax/rolling-std.
+
+3. **Asymmetric query quantization for binary**
+- Qdrant allows richer query encodings (`scalar4bits`, `scalar8bits`) against binary-indexed corpus.
+- Practical implication for ST eval: test asymmetric query-side quantization for binary retrieval quality recovery.
+
+4. **Binary encoding richness**
+- Qdrant has `one_bit`, `one_and_half_bits`, `two_bits` families.
+- Practical implication for ST train loss: investigate whether binary objective should include a richer/softer code target than strict 1-bit sign only.
+
+## Execution Strategy (Sequential, Traceable)
+
+All experiments use:
+- Dataset: `sentence-transformers/gooaq`
+- Effective training size: `1M request` (train `990,000` + eval `10,000`)
+- Batch size: `128`
+- Seed: fixed (`42`)
+- Same evaluation benchmark and report format
+
+For each change:
+1. Implement exactly one improvement.
+2. Run the 3 reference variants (or a minimal control pair if only eval changed).
+3. Compare against current control table.
+4. Log deltas, interpretation, and decision (keep/revert/iterate).
+
+## Planned Phases
+
+### Phase A: Eval-side improvements (no training-loss change)
+- A1. Add oversampling+rescore mode to evaluator-side quantized retrieval.
+- A2. Add quantile range calibration for int8 (`quantile` strategy).
+- A3. Add asymmetric query encoding mode for binary eval.
+
+Expected value: quickly identify whether quality loss is mostly from evaluation/retrieval approximation rather than train objective.
+
+### Phase B: Train-loss improvements
+- B1. Add ranking-consistency/distillation term between float32 and quantized similarity matrices.
+- B2. Keep cache-fix and stable warmup; tune quantized loss weighting based on A-phase findings.
+- B3. Test warmup defined by ratio as well as fixed steps (to avoid short-run under-warmup issues).
+
+Expected value: improve transfer from float training geometry to quantized ranking behavior.
+
+### Phase C: Joint tuning
+- Combine best A-phase eval setup with best B-phase train setup.
+- Re-run full comparison table at `1M, bs=128`.
+- Optionally validate on longer-run setting once stable.
+
+## Reporting Rules
+
+- Every run must produce both `.json` and `.md` artifacts in `qat_eval_results/`.
+- Maintain a cumulative experiment table with:
+  - variant name
+  - config diff
+  - float32/int8/binary nDCG@10
+  - delta vs control
+  - decision
+- If a change does not help, keep it documented and revert from the candidate default path.
+
+## Current Working Assumption
+
+The current instability is likely not from a single factor. It appears to be a combination of:
+- quantization calibration sensitivity,
+- retrieval-stage approximation effects,
+- and train-objective mismatch between float and quantized ranking behavior.
+
+This plan is designed to separate these factors and identify a robust recipe.
