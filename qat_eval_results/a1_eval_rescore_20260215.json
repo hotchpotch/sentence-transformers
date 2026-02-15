@@ -1,0 +1,44 @@
+{
+  "phase": "A1",
+  "title": "Evaluator oversampling + rescore",
+  "date": "2026-02-15",
+  "settings": {
+    "dataset": "sentence-transformers/gooaq",
+    "benchmark": "NanoBEIR (msmarco,nq)",
+    "train_samples": 990000,
+    "eval_samples": 10000,
+    "train_batch_size": 128,
+    "seed": 42,
+    "train_variant": "PR implementation (cache-fixed)",
+    "eval_quantization_mode": "evaluator"
+  },
+  "runs": [
+    {
+      "name": "control (no rescore)",
+      "json": "qat_eval_results/mpnet-base-gooaq-qat-mpnet-1m-a1-evaluator-control-bs128-20260215-204222.json",
+      "post_ndcg10": {
+        "float32": 0.5669192094111719,
+        "int8": 0.5669192094111719,
+        "binary": 0.5202547004261967
+      }
+    },
+    {
+      "name": "rescore x4",
+      "json": "qat_eval_results/mpnet-base-gooaq-qat-mpnet-1m-a1-evaluator-rescore4-bs128-20260215-210526.json",
+      "post_ndcg10": {
+        "float32": 0.5669192094111719,
+        "int8": 0.5669192094111719,
+        "binary": 0.5669192094111719
+      }
+    }
+  ],
+  "delta_rescore_minus_control": {
+    "float32": 0.0,
+    "int8": 0.0,
+    "binary": 0.0466645089849752
+  },
+  "notes": [
+    "Rescore strongly improves binary under evaluator mode.",
+    "With current implementation, final scores can collapse to near-identical values across precisions when rescoring is enabled."
+  ]
+}

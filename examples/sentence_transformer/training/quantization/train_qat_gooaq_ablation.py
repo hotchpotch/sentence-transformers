@@ -96,9 +96,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eval-benchmark", choices=["gooaq-dev", "nanobeir"], default="gooaq-dev")
     parser.add_argument("--eval-quantization-mode", choices=["legacy", "evaluator"], default="legacy")
     parser.add_argument("--eval-calibration-size", type=int, default=1024)
-    parser.add_argument("--eval-int8-range-strategy", choices=["minmax", "rolling_std"], default="minmax")
+    parser.add_argument("--eval-int8-range-strategy", choices=["minmax", "rolling_std", "quantile"], default="minmax")
     parser.add_argument("--eval-int8-range-momentum", type=float, default=0.99)
     parser.add_argument("--eval-int8-range-std-multiplier", type=float, default=1.0)
+    parser.add_argument("--eval-int8-range-quantile", type=float, default=0.995)
     parser.add_argument(
         "--eval-binary-reconstruction",
         choices=["zero_one", "minus_one_one"],
@@ -153,6 +154,7 @@ def create_gooaq_evaluator(
     eval_range_strategy: str,
     eval_rolling_momentum: float,
     eval_rolling_std_multiplier: float,
+    eval_range_quantile: float,
 ) -> SequentialEvaluator:
     random.seed(12)
     queries = dict(zip(eval_dataset["id"], eval_dataset["question"]))
@@ -174,6 +176,7 @@ def create_gooaq_evaluator(
                 quantization_range_strategy=eval_range_strategy,
                 quantization_rolling_momentum=eval_rolling_momentum,
                 quantization_rolling_std_multiplier=eval_rolling_std_multiplier,
+                quantization_range_quantile=eval_range_quantile,
                 quantization_dequantize=eval_dequantize,
                 binary_reconstruction=eval_binary_reconstruction,
                 quantize_queries=eval_quantize_queries,
@@ -200,6 +203,7 @@ def create_nanobeir_evaluator(
     eval_range_strategy: str,
     eval_rolling_momentum: float,
     eval_rolling_std_multiplier: float,
+    eval_range_quantile: float,
 ) -> SequentialEvaluator:
     evaluators = []
     for precision in eval_precisions:
@@ -221,6 +225,7 @@ def create_nanobeir_evaluator(
                 quantization_range_strategy=eval_range_strategy,
                 quantization_rolling_momentum=eval_rolling_momentum,
                 quantization_rolling_std_multiplier=eval_rolling_std_multiplier,
+                quantization_range_quantile=eval_range_quantile,
             )
         )
     return SequentialEvaluator(evaluators, main_score_function=lambda scores: scores[0])
@@ -451,6 +456,7 @@ def main() -> None:
             eval_range_strategy=args.eval_int8_range_strategy,
             eval_rolling_momentum=args.eval_int8_range_momentum,
             eval_rolling_std_multiplier=args.eval_int8_range_std_multiplier,
+            eval_range_quantile=args.eval_int8_range_quantile,
         )
     else:
         evaluator = create_nanobeir_evaluator(
@@ -468,6 +474,7 @@ def main() -> None:
             eval_range_strategy=args.eval_int8_range_strategy,
             eval_rolling_momentum=args.eval_int8_range_momentum,
             eval_rolling_std_multiplier=args.eval_int8_range_std_multiplier,
+            eval_range_quantile=args.eval_int8_range_quantile,
         )
 
     logger.info("Evaluating before training")
@@ -595,6 +602,7 @@ def main() -> None:
             "eval_int8_range_strategy": args.eval_int8_range_strategy,
             "eval_int8_range_momentum": args.eval_int8_range_momentum,
             "eval_int8_range_std_multiplier": args.eval_int8_range_std_multiplier,
+            "eval_int8_range_quantile": args.eval_int8_range_quantile,
             "eval_binary_reconstruction": args.eval_binary_reconstruction,
             "eval_dequantize": args.eval_dequantize,
             "eval_quantize_queries": args.eval_quantize_queries,

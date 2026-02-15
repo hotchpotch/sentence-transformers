@@ -235,9 +235,10 @@ class NanoBEIREvaluator(SentenceEvaluator):
         quantization_eval_mode: Literal["legacy", "evaluator"] = "legacy",
         quantization_calibration_size: int | None = 1024,
         quantization_ranges: np.ndarray | None = None,
-        quantization_range_strategy: Literal["minmax", "rolling_std"] = "minmax",
+        quantization_range_strategy: Literal["minmax", "rolling_std", "quantile"] = "minmax",
         quantization_rolling_momentum: float = 0.99,
         quantization_rolling_std_multiplier: float = 1.0,
+        quantization_range_quantile: float = 0.995,
         quantization_dequantize: bool = True,
         binary_reconstruction: Literal["zero_one", "minus_one_one"] = "zero_one",
         quantization_rescore: bool = False,
@@ -267,6 +268,7 @@ class NanoBEIREvaluator(SentenceEvaluator):
         self.quantization_range_strategy = quantization_range_strategy
         self.quantization_rolling_momentum = quantization_rolling_momentum
         self.quantization_rolling_std_multiplier = quantization_rolling_std_multiplier
+        self.quantization_range_quantile = quantization_range_quantile
         self.quantization_dequantize = quantization_dequantize
         self.binary_reconstruction = binary_reconstruction
         self.quantization_rescore = quantization_rescore
@@ -307,6 +309,7 @@ class NanoBEIREvaluator(SentenceEvaluator):
             "quantization_range_strategy": self.quantization_range_strategy,
             "quantization_rolling_momentum": self.quantization_rolling_momentum,
             "quantization_rolling_std_multiplier": self.quantization_rolling_std_multiplier,
+            "quantization_range_quantile": self.quantization_range_quantile,
             "quantization_dequantize": self.quantization_dequantize,
             "binary_reconstruction": self.binary_reconstruction,
             "quantization_rescore": self.quantization_rescore,

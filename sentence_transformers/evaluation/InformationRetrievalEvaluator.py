@@ -152,9 +152,10 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
         quantization_eval_mode: Literal["legacy", "evaluator"] = "legacy",
         quantization_calibration_size: int | None = 1024,
         quantization_ranges: np.ndarray | None = None,
-        quantization_range_strategy: Literal["minmax", "rolling_std"] = "minmax",
+        quantization_range_strategy: Literal["minmax", "rolling_std", "quantile"] = "minmax",
         quantization_rolling_momentum: float = 0.99,
         quantization_rolling_std_multiplier: float = 1.0,
+        quantization_range_quantile: float = 0.995,
         quantization_dequantize: bool = True,
         binary_reconstruction: Literal["zero_one", "minus_one_one"] = "zero_one",
         quantize_queries: bool = True,
@@ -200,6 +201,7 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
         self.quantization_range_strategy = quantization_range_strategy
         self.quantization_rolling_momentum = quantization_rolling_momentum
         self.quantization_rolling_std_multiplier = quantization_rolling_std_multiplier
+        self.quantization_range_quantile = quantization_range_quantile
         self.quantization_dequantize = quantization_dequantize
         self.binary_reconstruction = binary_reconstruction
         self.quantize_queries = quantize_queries
@@ -580,6 +582,8 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
         calibration_embeddings = np.vstack(calibration_embeddings)
         if self.quantization_range_strategy == "rolling_std":
             return self._compute_rolling_std_ranges(calibration_embeddings)
+        if self.quantization_range_strategy == "quantile":
+            return self._compute_quantile_ranges(calibration_embeddings)
         return np.vstack((np.min(calibration_embeddings, axis=0), np.max(calibration_embeddings, axis=0)))
 
     def _compute_rolling_std_ranges(self, calibration_embeddings: np.ndarray) -> np.ndarray:
@@ -606,6 +610,20 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
 
         starts = ema_mean - std_multiplier * ema_std
         ends = ema_mean + std_multiplier * ema_std
+        ends = np.maximum(ends, starts + 1e-6)
+        return np.vstack((starts, ends))
+
+    def _compute_quantile_ranges(self, calibration_embeddings: np.ndarray) -> np.ndarray:
+        if len(calibration_embeddings) == 0:
+            raise ValueError("Calibration embeddings must not be empty for quantile quantization ranges.")
+
+        quantile = float(self.quantization_range_quantile)
+        if not 0.5 < quantile <= 1.0:
+            raise ValueError("`quantization_range_quantile` must be in (0.5, 1.0].")
+
+        lower_q = 1.0 - quantile
+        starts = np.quantile(calibration_embeddings, lower_q, axis=0)
+        ends = np.quantile(calibration_embeddings, quantile, axis=0)
         ends = np.maximum(ends, starts + 1e-6)
         return np.vstack((starts, ends))
 

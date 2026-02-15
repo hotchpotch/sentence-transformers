@@ -76,6 +76,32 @@ For each change:
 
 Expected value: quickly identify whether quality loss is mostly from evaluation/retrieval approximation rather than train objective.
 
+### Phase A Progress (Current)
+
+Completed: **A1 (Evaluator oversampling + rescore)** on `1M / bs=128` with train variant `PR implementation (cache-fixed)`.
+
+| Variant | float32 | int8 | binary | JSON |
+| --- | ---: | ---: | ---: | --- |
+| evaluator control (no rescore) | 0.5669 | 0.5669 | 0.5203 | `qat_eval_results/mpnet-base-gooaq-qat-mpnet-1m-a1-evaluator-control-bs128-20260215-204222.json` |
+| evaluator rescore x4 | 0.5669 | 0.5669 | 0.5669 | `qat_eval_results/mpnet-base-gooaq-qat-mpnet-1m-a1-evaluator-rescore4-bs128-20260215-210526.json` |
+
+Initial interpretation:
+- Binary improved strongly with rescoring (`+0.0467`).
+- Scores became nearly identical across precisions in this setup, indicating rescoring may be masking quantized ranking differences.
+- Next step should keep A1 as a configurable eval option, then proceed to A2 (quantile calibration) and check whether precision separation remains meaningful.
+
+Completed: **A2 (Int8 quantile calibration)** on `1M / bs=128`, compared against A1 evaluator control (`minmax`, no rescore).
+
+| Variant | float32 | int8 | binary | JSON |
+| --- | ---: | ---: | ---: | --- |
+| A1 evaluator control (minmax) | 0.5669 | 0.5669 | 0.5203 | `qat_eval_results/mpnet-base-gooaq-qat-mpnet-1m-a1-evaluator-control-bs128-20260215-204222.json` |
+| A2 quantile (q=0.995) | 0.5669 | 0.5676 | 0.5203 | `qat_eval_results/mpnet-base-gooaq-qat-mpnet-1m-a2-evaluator-quantile0995-bs128-20260215-213110.json` |
+
+A2 interpretation:
+- Small but positive int8 gain (`+0.0007`) versus minmax.
+- No observed change for float32/binary in this setup.
+- Next: proceed to A3 (asymmetric query encoding for binary) and compare against the same control.
+
 ### Phase B: Train-loss improvements
 - B1. Add ranking-consistency/distillation term between float32 and quantized similarity matrices.
 - B2. Keep cache-fix and stable warmup; tune quantized loss weighting based on A-phase findings.

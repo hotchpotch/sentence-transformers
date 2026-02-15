@@ -151,3 +151,31 @@ def test_ir_evaluator_quantization_rescore_disabled_in_legacy_mode():
 
     assert evaluator._use_quantization_rescore is False
     assert evaluator._get_retrieval_k(max_k=10, corpus_size=100) == (10, 10)
+
+
+def test_ir_evaluator_quantile_quantization_ranges():
+    queries = {"q1": "query 1", "q2": "query 2"}
+    corpus = {"d1": "doc 1", "d2": "doc 2"}
+    relevant_docs = {"q1": {"d1"}, "q2": {"d2"}}
+    evaluator = InformationRetrievalEvaluator(
+        queries=queries,
+        corpus=corpus,
+        relevant_docs=relevant_docs,
+        precision="int8",
+        quantization_eval_mode="evaluator",
+        quantization_range_strategy="quantile",
+        quantization_range_quantile=0.75,
+    )
+
+    def fake_embed_inputs(*args, encode_fn_name=None, **kwargs):
+        if encode_fn_name == "query":
+            return torch.tensor([[0.0, 2.0], [2.0, 4.0]], dtype=torch.float32)
+        return torch.tensor([[1.0, 3.0], [3.0, 5.0]], dtype=torch.float32)
+
+    evaluator.embed_inputs = fake_embed_inputs
+    ranges = evaluator._compute_quantization_ranges(model=None, corpus_model=None)
+
+    calibration = np.array([[0.0, 2.0], [2.0, 4.0], [1.0, 3.0], [3.0, 5.0]], dtype=np.float32)
+    expected = np.vstack((np.quantile(calibration, 0.25, axis=0), np.quantile(calibration, 0.75, axis=0)))
+
+    assert np.allclose(ranges, expected, atol=1e-6)
