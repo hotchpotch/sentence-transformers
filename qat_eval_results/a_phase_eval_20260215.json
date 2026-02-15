@@ -1,0 +1,69 @@
+{
+  "phase": "A (eval-side)",
+  "date": "2026-02-15",
+  "settings": {
+    "dataset": "sentence-transformers/gooaq",
+    "benchmark": "NanoBEIR (msmarco,nq)",
+    "train_samples": 990000,
+    "eval_samples": 10000,
+    "train_batch_size": 128,
+    "seed": 42,
+    "train_variant": "PR implementation (cache-fixed)",
+    "eval_quantization_mode": "evaluator"
+  },
+  "variants": [
+    {
+      "name": "A1 control (minmax, quantize_queries=true, rescore=false)",
+      "json": "qat_eval_results/mpnet-base-gooaq-qat-mpnet-1m-a1-evaluator-control-bs128-20260215-204222.json",
+      "post_ndcg10": {
+        "float32": 0.5669192094111719,
+        "int8": 0.5669192094111719,
+        "binary": 0.5202547004261967
+      }
+    },
+    {
+      "name": "A1 rescore x4",
+      "json": "qat_eval_results/mpnet-base-gooaq-qat-mpnet-1m-a1-evaluator-rescore4-bs128-20260215-210526.json",
+      "post_ndcg10": {
+        "float32": 0.5669192094111719,
+        "int8": 0.5669192094111719,
+        "binary": 0.5669192094111719
+      }
+    },
+    {
+      "name": "A2 quantile=0.995",
+      "json": "qat_eval_results/mpnet-base-gooaq-qat-mpnet-1m-a2-evaluator-quantile0995-bs128-20260215-213110.json",
+      "post_ndcg10": {
+        "float32": 0.5669192094111719,
+        "int8": 0.5676297149278866,
+        "binary": 0.5202547004261967
+      }
+    },
+    {
+      "name": "A3 asymmetric queries (quantize_queries=false)",
+      "json": "qat_eval_results/mpnet-base-gooaq-qat-mpnet-1m-a3-evaluator-floatquery-bs128-20260215-215618.json",
+      "post_ndcg10": {
+        "float32": 0.5669192094111719,
+        "int8": 0.567097893976648,
+        "binary": 0.5508311631577272
+      }
+    }
+  ],
+  "delta_vs_control": {
+    "A1_rescore_x4": {
+      "float32": 0.0,
+      "int8": 0.0,
+      "binary": 0.0466645089849752
+    },
+    "A2_quantile_0995": {
+      "float32": 0.0,
+      "int8": 0.0007105055167147,
+      "binary": 0.0
+    },
+    "A3_asymmetric_queries": {
+      "float32": 0.0,
+      "int8": 0.0001786845654761,
+      "binary": 0.0305764627315305
+    }
+  }
+}

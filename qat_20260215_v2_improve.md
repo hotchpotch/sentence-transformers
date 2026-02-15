@@ -102,6 +102,19 @@ A2 interpretation:
 - No observed change for float32/binary in this setup.
 - Next: proceed to A3 (asymmetric query encoding for binary) and compare against the same control.
 
+Completed: **A3 (Asymmetric queries for quantized eval)** using `--no-eval-quantize-queries`.
+
+| Variant | float32 | int8 | binary | JSON |
+| --- | ---: | ---: | ---: | --- |
+| A1 evaluator control (minmax) | 0.5669 | 0.5669 | 0.5203 | `qat_eval_results/mpnet-base-gooaq-qat-mpnet-1m-a1-evaluator-control-bs128-20260215-204222.json` |
+| A3 asymmetric queries | 0.5669 | 0.5671 | 0.5508 | `qat_eval_results/mpnet-base-gooaq-qat-mpnet-1m-a3-evaluator-floatquery-bs128-20260215-215618.json` |
+
+A3 interpretation:
+- Binary improved materially (`+0.0306`) versus control.
+- Int8 changed slightly (`+0.0002`), float32 unchanged.
+
+Phase A summary (all A1/A2/A3 comparisons): `qat_eval_results/a_phase_eval_20260215.json` and `qat_eval_results/a_phase_eval_20260215.md`.
+
 ### Phase B: Train-loss improvements
 - B1. Add ranking-consistency/distillation term between float32 and quantized similarity matrices.
 - B2. Keep cache-fix and stable warmup; tune quantized loss weighting based on A-phase findings.
