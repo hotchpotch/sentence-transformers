@@ -106,6 +106,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--eval-dequantize", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--eval-quantize-queries", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--eval-rescore", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--eval-rescore-multiplier", type=int, default=2)
     parser.add_argument("--eval-precisions", default="float32,int8,binary")
     parser.add_argument("--nanobeir-dataset-id", default="sentence-transformers/NanoBEIR-en")
     parser.add_argument("--nanobeir-dataset-names", default="msmarco,nq")
@@ -146,6 +148,8 @@ def create_gooaq_evaluator(
     eval_binary_reconstruction: str,
     eval_dequantize: bool,
     eval_quantize_queries: bool,
+    eval_rescore: bool,
+    eval_rescore_multiplier: int,
     eval_range_strategy: str,
     eval_rolling_momentum: float,
     eval_rolling_std_multiplier: float,
@@ -173,6 +177,8 @@ def create_gooaq_evaluator(
                 quantization_dequantize=eval_dequantize,
                 binary_reconstruction=eval_binary_reconstruction,
                 quantize_queries=eval_quantize_queries,
+                quantization_rescore=eval_rescore,
+                quantization_rescore_multiplier=eval_rescore_multiplier,
             )
         )
 
@@ -189,6 +195,8 @@ def create_nanobeir_evaluator(
     eval_calibration_size: int,
     eval_dequantize: bool,
     eval_binary_reconstruction: str,
+    eval_rescore: bool,
+    eval_rescore_multiplier: int,
     eval_range_strategy: str,
     eval_rolling_momentum: float,
     eval_rolling_std_multiplier: float,
@@ -208,6 +216,8 @@ def create_nanobeir_evaluator(
                 quantization_calibration_size=eval_calibration_size,
                 quantization_dequantize=eval_dequantize,
                 binary_reconstruction=eval_binary_reconstruction,
+                quantization_rescore=eval_rescore,
+                quantization_rescore_multiplier=eval_rescore_multiplier,
                 quantization_range_strategy=eval_range_strategy,
                 quantization_rolling_momentum=eval_rolling_momentum,
                 quantization_rolling_std_multiplier=eval_rolling_std_multiplier,
@@ -436,6 +446,8 @@ def main() -> None:
             eval_binary_reconstruction=args.eval_binary_reconstruction,
             eval_dequantize=args.eval_dequantize,
             eval_quantize_queries=args.eval_quantize_queries,
+            eval_rescore=args.eval_rescore,
+            eval_rescore_multiplier=args.eval_rescore_multiplier,
             eval_range_strategy=args.eval_int8_range_strategy,
             eval_rolling_momentum=args.eval_int8_range_momentum,
             eval_rolling_std_multiplier=args.eval_int8_range_std_multiplier,
@@ -451,6 +463,8 @@ def main() -> None:
             eval_calibration_size=args.eval_calibration_size,
             eval_dequantize=args.eval_dequantize,
             eval_binary_reconstruction=args.eval_binary_reconstruction,
+            eval_rescore=args.eval_rescore,
+            eval_rescore_multiplier=args.eval_rescore_multiplier,
             eval_range_strategy=args.eval_int8_range_strategy,
             eval_rolling_momentum=args.eval_int8_range_momentum,
             eval_rolling_std_multiplier=args.eval_int8_range_std_multiplier,
@@ -584,6 +598,8 @@ def main() -> None:
             "eval_binary_reconstruction": args.eval_binary_reconstruction,
             "eval_dequantize": args.eval_dequantize,
             "eval_quantize_queries": args.eval_quantize_queries,
+            "eval_rescore": args.eval_rescore,
+            "eval_rescore_multiplier": args.eval_rescore_multiplier,
             "nanobeir_dataset_id": args.nanobeir_dataset_id,
             "nanobeir_dataset_names": parse_csv_list(args.nanobeir_dataset_names, str),
             "nanobeir_batch_size": args.nanobeir_batch_size,

@@ -126,3 +126,28 @@ def test_ir_evaluator_rolling_std_quantization_ranges():
     expected = np.vstack((expected_mean - expected_std, expected_mean + expected_std))
 
     assert np.allclose(ranges, expected, atol=1e-5)
+
+
+def test_ir_evaluator_quantization_rescore_retrieval_k():
+    evaluator = _build_ir_evaluator(
+        precision="int8",
+        quantization_eval_mode="evaluator",
+        quantization_rescore=True,
+        quantization_rescore_multiplier=4,
+    )
+
+    assert evaluator._use_quantization_rescore is True
+    assert evaluator._get_retrieval_k(max_k=10, corpus_size=100) == (40, 10)
+    assert evaluator._get_retrieval_k(max_k=10, corpus_size=23) == (23, 10)
+
+
+def test_ir_evaluator_quantization_rescore_disabled_in_legacy_mode():
+    evaluator = _build_ir_evaluator(
+        precision="int8",
+        quantization_eval_mode="legacy",
+        quantization_rescore=True,
+        quantization_rescore_multiplier=4,
+    )
+
+    assert evaluator._use_quantization_rescore is False
+    assert evaluator._get_retrieval_k(max_k=10, corpus_size=100) == (10, 10)

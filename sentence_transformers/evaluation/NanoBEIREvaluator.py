@@ -240,6 +240,8 @@ class NanoBEIREvaluator(SentenceEvaluator):
         quantization_rolling_std_multiplier: float = 1.0,
         quantization_dequantize: bool = True,
         binary_reconstruction: Literal["zero_one", "minus_one_one"] = "zero_one",
+        quantization_rescore: bool = False,
+        quantization_rescore_multiplier: int = 2,
     ):
         super().__init__()
         if dataset_names is None:
@@ -267,6 +269,8 @@ class NanoBEIREvaluator(SentenceEvaluator):
         self.quantization_rolling_std_multiplier = quantization_rolling_std_multiplier
         self.quantization_dequantize = quantization_dequantize
         self.binary_reconstruction = binary_reconstruction
+        self.quantization_rescore = quantization_rescore
+        self.quantization_rescore_multiplier = quantization_rescore_multiplier
         self.name = f"NanoBEIR_{aggregate_key}"
         if self.truncate_dim:
             self.name += f"_{self.truncate_dim}"
@@ -305,6 +309,8 @@ class NanoBEIREvaluator(SentenceEvaluator):
             "quantization_rolling_std_multiplier": self.quantization_rolling_std_multiplier,
             "quantization_dequantize": self.quantization_dequantize,
             "binary_reconstruction": self.binary_reconstruction,
+            "quantization_rescore": self.quantization_rescore,
+            "quantization_rescore_multiplier": self.quantization_rescore_multiplier,
         }
         self.evaluators = [
             self._load_dataset(name, **ir_evaluator_kwargs)

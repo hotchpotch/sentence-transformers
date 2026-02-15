@@ -22,7 +22,15 @@ Reference scores to reproduce:
 - `PR implementation (cache-fixed)`: `0.5646 / 0.5731 / 0.5621`
 - `Linear staged warmup`: `0.5703 / 0.5640 / 0.5457`
 
-If reproducibility differs materially, update the recorded baseline table with the newly observed scores and use those as the new control.
+Re-run status (`2026-02-15`):
+
+| Variant | Old reference (float32/int8/binary) | Re-run (float32/int8/binary) | JSON |
+| --- | --- | --- | --- |
+| MNRL baseline | 0.5723 / 0.5641 / 0.5383 | 0.5646 / 0.5598 / 0.5405 | `qat_eval_results/mpnet-base-gooaq-qat-mpnet-1m-repro-baseline-mnrl-bs128-20260215-192742.json` |
+| PR implementation (cache-fixed) | 0.5646 / 0.5731 / 0.5621 | 0.5669 / 0.5667 / 0.5203 | `qat_eval_results/mpnet-base-gooaq-qat-mpnet-1m-repro-trainb-control-bs128-20260215-195011.json` |
+| Linear staged warmup | 0.5703 / 0.5640 / 0.5457 | 0.5658 / 0.5594 / 0.5332 | `qat_eval_results/mpnet-base-gooaq-qat-mpnet-1m-repro-warmup1800-bs128-20260215-201313.json` |
+
+Because reproducibility changed materially, the re-run values above are the control set for the next ablation phases.
 
 ## Qdrant-Inspired Improvement Themes
 

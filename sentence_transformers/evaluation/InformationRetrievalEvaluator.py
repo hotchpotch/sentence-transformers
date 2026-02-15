@@ -158,6 +158,8 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
         quantization_dequantize: bool = True,
         binary_reconstruction: Literal["zero_one", "minus_one_one"] = "zero_one",
         quantize_queries: bool = True,
+        quantization_rescore: bool = False,
+        quantization_rescore_multiplier: int = 2,
     ) -> None:
         super().__init__()
         self.queries_ids = []
@@ -201,6 +203,8 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
         self.quantization_dequantize = quantization_dequantize
         self.binary_reconstruction = binary_reconstruction
         self.quantize_queries = quantize_queries
+        self.quantization_rescore = quantization_rescore
+        self.quantization_rescore_multiplier = max(1, quantization_rescore_multiplier)
 
         if name:
             name = "_" + name
@@ -236,6 +240,16 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
     @property
     def _use_evaluator_quantization(self) -> bool:
         return self.quantization_eval_mode == "evaluator" and self.precision not in (None, "float32")
+
+    @property
+    def _use_quantization_rescore(self) -> bool:
+        return self._use_evaluator_quantization and self.quantization_rescore
+
+    def _get_retrieval_k(self, max_k: int, corpus_size: int) -> tuple[int, int]:
+        retrieval_k = min(max_k, corpus_size)
+        if self._use_quantization_rescore:
+            retrieval_k = min(max_k * self.quantization_rescore_multiplier, corpus_size)
+        return retrieval_k, min(max_k, corpus_size)
 
     def __call__(
         self,
@@ -341,19 +355,22 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
 
         # Compute embedding for the queries
         quantization_ranges = self._compute_quantization_ranges(model=model, corpus_model=corpus_model)
-        query_embeddings = self.embed_inputs(
+        query_embeddings_raw = self.embed_inputs(
             model,
             self.queries,
             encode_fn_name="query",
             prompt_name=self.query_prompt_name,
             prompt=self.query_prompt,
         )
+        query_embeddings_rescore = (
+            self._convert_to_float(query_embeddings_raw) if self._use_quantization_rescore else None
+        )
 
         if self._use_evaluator_quantization and self.quantize_queries:
-            query_embeddings = self._quantize_and_convert(query_embeddings, ranges=quantization_ranges)
+            query_embeddings = self._quantize_and_convert(query_embeddings_raw, ranges=quantization_ranges)
         else:
             # Convert quantized embeddings to float32 for similarity computations
-            query_embeddings = self._convert_to_float(query_embeddings)
+            query_embeddings = self._convert_to_float(query_embeddings_raw)
 
         queries_result_list = {}
         for name in self.score_functions:
@@ -367,7 +384,7 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
 
             # Encode chunk of corpus
             if corpus_embeddings is None:
-                sub_corpus_embeddings = self.embed_inputs(
+                sub_corpus_embeddings_raw = self.embed_inputs(
                     corpus_model,
                     self.corpus[corpus_start_idx:corpus_end_idx],
                     encode_fn_name="document",
@@ -375,12 +392,17 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
                     prompt=self.corpus_prompt,
                 )
             else:
-                sub_corpus_embeddings = corpus_embeddings[corpus_start_idx:corpus_end_idx]
+                sub_corpus_embeddings_raw = corpus_embeddings[corpus_start_idx:corpus_end_idx]
+            sub_corpus_embeddings_rescore = (
+                self._convert_to_float(sub_corpus_embeddings_raw) if self._use_quantization_rescore else None
+            )
             if self._use_evaluator_quantization:
-                sub_corpus_embeddings = self._quantize_and_convert(sub_corpus_embeddings, ranges=quantization_ranges)
+                sub_corpus_embeddings = self._quantize_and_convert(
+                    sub_corpus_embeddings_raw, ranges=quantization_ranges
+                )
             else:
                 # Convert quantized embeddings to float32 for similarity computations
-                sub_corpus_embeddings = self._convert_to_float(sub_corpus_embeddings)
+                sub_corpus_embeddings = self._convert_to_float(sub_corpus_embeddings_raw)
 
             # Compute cosine similarites
             for name, score_function in self.score_functions.items():
@@ -388,12 +410,37 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
                     sub_corpus_embeddings = sub_corpus_embeddings.to(query_embeddings.device)
                 pair_scores = score_function(query_embeddings, sub_corpus_embeddings)
 
+                retrieval_k, final_k = self._get_retrieval_k(max_k=max_k, corpus_size=len(pair_scores[0]))
+
                 # Get top-k values
                 pair_scores_top_k_values, pair_scores_top_k_idx = torch.topk(
-                    pair_scores, min(max_k, len(pair_scores[0])), dim=1, largest=True, sorted=False
+                    pair_scores, retrieval_k, dim=1, largest=True, sorted=False
                 )
-                pair_scores_top_k_values = pair_scores_top_k_values.cpu().tolist()
-                pair_scores_top_k_idx = pair_scores_top_k_idx.cpu().tolist()
+                if (
+                    self._use_quantization_rescore
+                    and query_embeddings_rescore is not None
+                    and sub_corpus_embeddings_rescore is not None
+                ):
+                    query_embeddings_rescore = query_embeddings_rescore.to(query_embeddings.device)
+                    sub_corpus_embeddings_rescore = sub_corpus_embeddings_rescore.to(query_embeddings.device)
+                    rescored_top_k_values = []
+                    rescored_top_k_idx = []
+
+                    for query_itr in range(len(query_embeddings)):
+                        candidate_idx = pair_scores_top_k_idx[query_itr]
+                        candidate_embeddings = sub_corpus_embeddings_rescore[candidate_idx]
+                        rescored_scores = score_function(
+                            query_embeddings_rescore[query_itr : query_itr + 1], candidate_embeddings
+                        ).squeeze(0)
+                        top_values, top_indices = torch.topk(rescored_scores, final_k, largest=True, sorted=False)
+                        rescored_top_k_values.append(top_values.detach().cpu().tolist())
+                        rescored_top_k_idx.append(candidate_idx[top_indices].detach().cpu().tolist())
+
+                    pair_scores_top_k_values = rescored_top_k_values
+                    pair_scores_top_k_idx = rescored_top_k_idx
+                else:
+                    pair_scores_top_k_values = pair_scores_top_k_values.cpu().tolist()
+                    pair_scores_top_k_idx = pair_scores_top_k_idx.cpu().tolist()
 
                 for query_itr in range(len(query_embeddings)):
                     for sub_corpus_id, score in zip(
