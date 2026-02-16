@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import logging
 import random
-from collections.abc import Iterable, Sequence
-from typing import Any, Callable, Literal, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from typing import Any, Literal
 
 import torch
 from torch import Tensor, nn
+from torch.nn import functional as F
 
 from sentence_transformers.losses import (
     CachedGISTEmbedLoss,
@@ -131,6 +132,34 @@ def quantize_embeddings_torch(
     raise ValueError(f"Unsupported precision: {precision}")
 
 
+def normalized_embedding_consistency_loss(
+    quantized_outputs: Sequence[dict[str, Tensor]],
+    float32_outputs: Sequence[dict[str, Tensor]],
+) -> Tensor | None:
+    """
+    Compute an embedding-level consistency term between quantized and float32 outputs.
+
+    The loss is the mean squared error between L2-normalized sentence embeddings.
+    """
+    if not quantized_outputs or not float32_outputs:
+        return None
+
+    loss_terms: list[Tensor] = []
+    for quantized_output, float32_output in zip(quantized_outputs, float32_outputs):
+        quantized_embeddings = quantized_output.get("sentence_embedding")
+        float32_embeddings = float32_output.get("sentence_embedding")
+        if quantized_embeddings is None or float32_embeddings is None:
+            continue
+
+        quantized_normalized = F.normalize(quantized_embeddings, p=2, dim=-1)
+        float32_normalized = F.normalize(float32_embeddings.detach(), p=2, dim=-1)
+        loss_terms.append(F.mse_loss(quantized_normalized, float32_normalized))
+
+    if not loss_terms:
+        return None
+    return torch.stack(loss_terms).mean()
+
+
 class ForwardDecorator:
     """
     This decorator is used to cache the output of the Sentence Transformer's forward pass,
@@ -154,6 +183,7 @@ class ForwardDecorator:
         self.cache = []
         self.caching_mode = True  # First call caches, subsequent calls use cache
         self.idx = 0
+        self.last_outputs = []
         self.int8_range_state = int8_range_state
         self.use_int8_range_state = use_int8_range_state
         self.int8_range_momentum = int8_range_momentum
@@ -162,17 +192,20 @@ class ForwardDecorator:
     def set_precision(self, precision: str | None) -> None:
         self.precision = precision
         self.idx = 0
+        self.last_outputs = []
 
     def start_caching(self) -> None:
         """Start caching mode - compute embeddings and store them"""
         self.caching_mode = True
         self.cache = []
         self.idx = 0
+        self.last_outputs = []
 
     def use_cache(self) -> None:
         """Use cache mode - retrieve embeddings from cache"""
         self.caching_mode = False
         self.idx = 0
+        self.last_outputs = []
 
     def __call__(self, features: dict[str, Tensor]) -> dict[str, Tensor]:
         # Growing cache (first pass with no quantization):
@@ -190,6 +223,7 @@ class ForwardDecorator:
                 output["token_embeddings"] = self._quantize(output["token_embeddings"], self.precision)
             output["sentence_embedding"] = self._quantize(output["sentence_embedding"], self.precision)
 
+        self.last_outputs.append(output)
         self.idx += 1
         return output
 
@@ -317,6 +351,7 @@ class QuantizationAwareLoss(nn.Module):
         int8_range_momentum: float = 0.99,
         quantization_warmup_steps: int = 0,
         quantization_warmup_steps_by_precision: Mapping[str, int] | None = None,
+        consistency_weight: float = 0.0,
     ) -> None:
         """
         The QuantizationAwareLoss can be seen as a loss *modifier* that allows you to use other loss functions with
@@ -353,6 +388,9 @@ class QuantizationAwareLoss(nn.Module):
                 Optional precision-specific warmup steps, e.g.
                 {"int8": 200, "binary": 800}. If provided, these values
                 override `quantization_warmup_steps` for matching precisions.
+            consistency_weight:
+                Optional weight for an embedding-level consistency term between
+                quantized and float32 sentence embeddings. Set to 0.0 to disable.
 
         References:
             - Quantization-Aware Training: https://arxiv.org/abs/1712.05877
@@ -415,6 +453,7 @@ class QuantizationAwareLoss(nn.Module):
         self.use_int8_range_state = use_int8_range_state
         self.int8_range_momentum = int8_range_momentum
         self.quantization_warmup_steps = quantization_warmup_steps
+        self.consistency_weight = float(consistency_weight)
         self.quantization_warmup_steps_by_precision = resolve_warmup_steps_by_precision(
             self.quantization_precisions,
             quantization_warmup_steps=self.quantization_warmup_steps,
@@ -425,6 +464,8 @@ class QuantizationAwareLoss(nn.Module):
 
         if binary_mode not in ("signed", "unsigned"):
             raise ValueError("binary_mode must be either 'signed' or 'unsigned'.")
+        if self.consistency_weight < 0.0:
+            raise ValueError("consistency_weight must be >= 0.0.")
 
         # The Cached... losses require a special treatment as their backward pass is incompatible with the
         # ForwardDecorator approach. Instead, we use a CachedLossDecorator to compute the loss for each
@@ -518,6 +559,15 @@ class QuantizationAwareLoss(nn.Module):
                     )
 
                 step_loss = weight * self.loss(sentence_features, precision_labels)
+                if self.consistency_weight > 0.0:
+                    consistency = normalized_embedding_consistency_loss(
+                        decorated_forward.last_outputs,
+                        decorated_forward.cache,
+                    )
+                    if consistency is not None:
+                        consistency_term = self.consistency_weight * consistency
+                        losses[f"qat_{precision}_consistency"] = consistency_term
+                        step_loss = step_loss + consistency_term
                 losses[f"qat_{precision}"] = step_loss
 
         finally:
@@ -536,6 +586,7 @@ class QuantizationAwareLoss(nn.Module):
             "int8_range_momentum": self.int8_range_momentum,
             "quantization_warmup_steps": self.quantization_warmup_steps,
             "quantization_warmup_steps_by_precision": self.quantization_warmup_steps_by_precision,
+            "consistency_weight": self.consistency_weight,
         }
 
     @property

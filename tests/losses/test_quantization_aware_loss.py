@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import torch
-
 import pytest
+import torch
 
 from sentence_transformers.losses.QuantizationAwareLoss import (
     ForwardDecorator,
+    normalized_embedding_consistency_loss,
     quantize_embeddings_torch,
     resolve_warmup_steps_by_precision,
 )
@@ -119,3 +119,23 @@ def test_forward_decorator_keeps_cache_float32_across_precisions():
 
     # Binary pass should quantize from original float32 cache, not int8-mutated values.
     assert torch.equal(binary_output, expected_binary)
+
+
+def test_normalized_embedding_consistency_loss_is_zero_for_identical_embeddings():
+    float_outputs = [{"sentence_embedding": torch.tensor([[1.0, 2.0], [3.0, 4.0]])}]
+    quantized_outputs = [{"sentence_embedding": torch.tensor([[1.0, 2.0], [3.0, 4.0]])}]
+
+    consistency = normalized_embedding_consistency_loss(quantized_outputs, float_outputs)
+
+    assert consistency is not None
+    assert torch.allclose(consistency, torch.tensor(0.0), atol=1e-7)
+
+
+def test_normalized_embedding_consistency_loss_is_positive_for_shifted_embeddings():
+    float_outputs = [{"sentence_embedding": torch.tensor([[1.0, 2.0], [3.0, 4.0]])}]
+    quantized_outputs = [{"sentence_embedding": torch.tensor([[2.0, 1.0], [4.0, 3.0]])}]
+
+    consistency = normalized_embedding_consistency_loss(quantized_outputs, float_outputs)
+
+    assert consistency is not None
+    assert consistency > 0.0

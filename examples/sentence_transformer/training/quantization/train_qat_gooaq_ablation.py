@@ -120,6 +120,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--train-int8-range-momentum", type=float, default=0.99)
     parser.add_argument("--train-quantization-warmup-steps", type=int, default=200)
     parser.add_argument(
+        "--train-consistency-weight",
+        type=float,
+        default=0.0,
+        help="Optional consistency regularization weight between quantized and float32 embeddings.",
+    )
+    parser.add_argument(
         "--train-precision-warmup-steps",
         default="",
         help="Optional CSV of warmup steps aligned with --train-precisions, e.g. 0,200,800",
@@ -494,6 +500,7 @@ def main() -> None:
                 int8_range_momentum=args.train_int8_range_momentum,
                 quantization_warmup_steps=args.train_quantization_warmup_steps,
                 quantization_warmup_steps_by_precision=quantization_warmup_steps_by_precision,
+                consistency_weight=args.train_consistency_weight,
             )
         else:
             loss = base_loss
@@ -619,6 +626,7 @@ def main() -> None:
             "train_int8_range_momentum": args.train_int8_range_momentum,
             "train_quantization_warmup_steps": args.train_quantization_warmup_steps,
             "train_precision_warmup_steps": precision_warmup_steps,
+            "train_consistency_weight": args.train_consistency_weight,
             "skip_train": args.skip_train,
             "eval_during_train": args.eval_during_train,
             "eval_every_train_samples": args.eval_every_train_samples,
