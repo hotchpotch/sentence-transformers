@@ -120,6 +120,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--train-int8-range-momentum", type=float, default=0.99)
     parser.add_argument("--train-quantization-warmup-steps", type=int, default=200)
     parser.add_argument(
+        "--train-quantization-role",
+        choices=["all", "docs_only", "queries_only"],
+        default="all",
+        help="Which sentence-feature role to quantize during training.",
+    )
+    parser.add_argument(
         "--train-consistency-weight",
         type=float,
         default=0.0,
@@ -500,6 +506,7 @@ def main() -> None:
                 int8_range_momentum=args.train_int8_range_momentum,
                 quantization_warmup_steps=args.train_quantization_warmup_steps,
                 quantization_warmup_steps_by_precision=quantization_warmup_steps_by_precision,
+                quantization_role=args.train_quantization_role,
                 consistency_weight=args.train_consistency_weight,
             )
         else:
@@ -625,6 +632,7 @@ def main() -> None:
             "train_use_int8_range_state": args.train_use_int8_range_state,
             "train_int8_range_momentum": args.train_int8_range_momentum,
             "train_quantization_warmup_steps": args.train_quantization_warmup_steps,
+            "train_quantization_role": args.train_quantization_role,
             "train_precision_warmup_steps": precision_warmup_steps,
             "train_consistency_weight": args.train_consistency_weight,
             "skip_train": args.skip_train,

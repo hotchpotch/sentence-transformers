@@ -8,6 +8,7 @@ from sentence_transformers.losses.QuantizationAwareLoss import (
     normalized_embedding_consistency_loss,
     quantize_embeddings_torch,
     resolve_warmup_steps_by_precision,
+    should_quantize_feature,
 )
 
 
@@ -139,3 +140,45 @@ def test_normalized_embedding_consistency_loss_is_positive_for_shifted_embedding
 
     assert consistency is not None
     assert consistency > 0.0
+
+
+@pytest.mark.parametrize(
+    ("feature_index", "quantization_role", "expected"),
+    [
+        (0, "all", True),
+        (1, "all", True),
+        (0, "docs_only", False),
+        (1, "docs_only", True),
+        (2, "docs_only", True),
+        (0, "queries_only", True),
+        (1, "queries_only", False),
+    ],
+)
+def test_should_quantize_feature(feature_index: int, quantization_role: str, expected: bool):
+    assert should_quantize_feature(feature_index, quantization_role) is expected
+
+
+def test_forward_decorator_docs_only_quantizes_only_documents():
+    outputs = [
+        {"sentence_embedding": torch.tensor([[-1.0, 1.0]])},  # query/anchor
+        {"sentence_embedding": torch.tensor([[-1.0, 1.0]])},  # document/positive
+    ]
+
+    def forward_fn(_features):
+        return outputs.pop(0)
+
+    decorator = ForwardDecorator(forward_fn, quantization_role="docs_only")
+    decorator.start_caching()
+    decorator.set_precision(None)
+    _ = decorator({})
+    _ = decorator({})
+
+    decorator.use_cache()
+    decorator.set_precision("binary")
+    query_output = decorator({})["sentence_embedding"]
+    doc_output = decorator({})["sentence_embedding"]
+
+    # Query is not quantized for docs_only.
+    assert torch.equal(query_output, torch.tensor([[-1.0, 1.0]]))
+    # Document is quantized to unsigned binary (0/1).
+    assert torch.equal(doc_output, torch.tensor([[0.0, 1.0]]))

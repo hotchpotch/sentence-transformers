@@ -160,6 +160,26 @@ def normalized_embedding_consistency_loss(
     return torch.stack(loss_terms).mean()
 
 
+def should_quantize_feature(
+    feature_index: int,
+    quantization_role: Literal["all", "docs_only", "queries_only"],
+) -> bool:
+    """
+    Decide whether to quantize a sentence feature by its position in the loss input.
+
+    Convention:
+    - index 0: query / anchor
+    - index >= 1: documents (positive + negatives)
+    """
+    if quantization_role == "all":
+        return True
+    if quantization_role == "docs_only":
+        return feature_index > 0
+    if quantization_role == "queries_only":
+        return feature_index == 0
+    raise ValueError(f"Unsupported quantization_role: {quantization_role}")
+
+
 class ForwardDecorator:
     """
     This decorator is used to cache the output of the Sentence Transformer's forward pass,
@@ -176,6 +196,7 @@ class ForwardDecorator:
         use_int8_range_state: bool = False,
         int8_range_momentum: float = 0.99,
         binary_mode: Literal["signed", "unsigned"] = "unsigned",
+        quantization_role: Literal["all", "docs_only", "queries_only"] = "all",
     ) -> None:
         self.fn = fn
 
@@ -188,6 +209,7 @@ class ForwardDecorator:
         self.use_int8_range_state = use_int8_range_state
         self.int8_range_momentum = int8_range_momentum
         self.binary_mode = binary_mode
+        self.quantization_role = quantization_role
 
     def set_precision(self, precision: str | None) -> None:
         self.precision = precision
@@ -218,7 +240,7 @@ class ForwardDecorator:
             output = self.cache[self.idx].copy()
 
         # Quantize the embeddings if precision is specified
-        if self.precision is not None:
+        if self.precision is not None and should_quantize_feature(self.idx, self.quantization_role):
             if "token_embeddings" in output:
                 output["token_embeddings"] = self._quantize(output["token_embeddings"], self.precision)
             output["sentence_embedding"] = self._quantize(output["sentence_embedding"], self.precision)
@@ -259,6 +281,7 @@ class CachedLossDecorator:
         use_int8_range_state: bool = False,
         int8_range_momentum: float = 0.99,
         binary_mode: Literal["signed", "unsigned"] = "unsigned",
+        quantization_role: Literal["all", "docs_only", "queries_only"] = "all",
         scaled_weight_fn: Callable[[str, float | int], float] | None = None,
     ) -> None:
         self.fn = fn
@@ -269,6 +292,7 @@ class CachedLossDecorator:
         self.use_int8_range_state = use_int8_range_state
         self.int8_range_momentum = int8_range_momentum
         self.binary_mode = binary_mode
+        self.quantization_role = quantization_role
         self.scaled_weight_fn = scaled_weight_fn
 
     def __call__(self, reps: list[list[Tensor]], *args, **kwargs) -> Tensor:
@@ -298,7 +322,15 @@ class CachedLossDecorator:
             weight = self._scaled_weight(precision, self.quantization_weights[idx])
 
             # Quantize embeddings
-            quantized = [[self._quantize(r, precision) for r in minibatch] for minibatch in reps]
+            quantized = [
+                [
+                    self._quantize(r, precision)
+                    if should_quantize_feature(minibatch_idx, self.quantization_role)
+                    else r
+                    for r in minibatch
+                ]
+                for minibatch_idx, minibatch in enumerate(reps)
+            ]
             compute_gradients = torch.is_grad_enabled()
 
             # we need to detach the quantized embeddings,
@@ -351,6 +383,7 @@ class QuantizationAwareLoss(nn.Module):
         int8_range_momentum: float = 0.99,
         quantization_warmup_steps: int = 0,
         quantization_warmup_steps_by_precision: Mapping[str, int] | None = None,
+        quantization_role: Literal["all", "docs_only", "queries_only"] = "all",
         consistency_weight: float = 0.0,
     ) -> None:
         """
@@ -388,6 +421,10 @@ class QuantizationAwareLoss(nn.Module):
                 Optional precision-specific warmup steps, e.g.
                 {"int8": 200, "binary": 800}. If provided, these values
                 override `quantization_warmup_steps` for matching precisions.
+            quantization_role:
+                Which sentence-feature role should be quantized during training.
+                "all" quantizes query+docs, "docs_only" quantizes only docs,
+                and "queries_only" quantizes only queries.
             consistency_weight:
                 Optional weight for an embedding-level consistency term between
                 quantized and float32 sentence embeddings. Set to 0.0 to disable.
@@ -453,6 +490,7 @@ class QuantizationAwareLoss(nn.Module):
         self.use_int8_range_state = use_int8_range_state
         self.int8_range_momentum = int8_range_momentum
         self.quantization_warmup_steps = quantization_warmup_steps
+        self.quantization_role = quantization_role
         self.consistency_weight = float(consistency_weight)
         self.quantization_warmup_steps_by_precision = resolve_warmup_steps_by_precision(
             self.quantization_precisions,
@@ -464,6 +502,8 @@ class QuantizationAwareLoss(nn.Module):
 
         if binary_mode not in ("signed", "unsigned"):
             raise ValueError("binary_mode must be either 'signed' or 'unsigned'.")
+        if self.quantization_role not in ("all", "docs_only", "queries_only"):
+            raise ValueError("quantization_role must be one of: 'all', 'docs_only', 'queries_only'.")
         if self.consistency_weight < 0.0:
             raise ValueError("consistency_weight must be >= 0.0.")
 
@@ -485,6 +525,7 @@ class QuantizationAwareLoss(nn.Module):
                 use_int8_range_state=self.use_int8_range_state,
                 int8_range_momentum=self.int8_range_momentum,
                 binary_mode=self.binary_mode,
+                quantization_role=self.quantization_role,
                 scaled_weight_fn=self._scaled_weight,
             )
 
@@ -513,6 +554,7 @@ class QuantizationAwareLoss(nn.Module):
                 use_int8_range_state=self.use_int8_range_state,
                 int8_range_momentum=self.int8_range_momentum,
                 binary_mode=self.binary_mode,
+                quantization_role=self.quantization_role,
             )
             self.model.forward = decorated_forward
 
@@ -586,6 +628,7 @@ class QuantizationAwareLoss(nn.Module):
             "int8_range_momentum": self.int8_range_momentum,
             "quantization_warmup_steps": self.quantization_warmup_steps,
             "quantization_warmup_steps_by_precision": self.quantization_warmup_steps_by_precision,
+            "quantization_role": self.quantization_role,
             "consistency_weight": self.consistency_weight,
         }
 
