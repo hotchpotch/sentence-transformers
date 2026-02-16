@@ -35,6 +35,7 @@ from sentence_transformers import (
     losses,
 )
 from sentence_transformers.evaluation import InformationRetrievalEvaluator, NanoBEIREvaluator, SequentialEvaluator
+from sentence_transformers.losses.CachedMultipleNegativesRankingLoss import CachedMultipleNegativesRankingLoss
 from sentence_transformers.losses.MultipleNegativesRankingLoss import MultipleNegativesRankingLoss
 from sentence_transformers.training_args import BatchSamplers
 
@@ -82,6 +83,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--trust-remote-code", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--experiment-name", required=True)
     parser.add_argument("--train-loss", choices=["qat", "mnrl"], default="qat")
+    parser.add_argument(
+        "--train-base-loss",
+        choices=["mnrl", "cached_mnrl"],
+        default="mnrl",
+        help="Base retrieval loss used under --train-loss.",
+    )
+    parser.add_argument(
+        "--cached-mnrl-mini-batch-size",
+        type=int,
+        default=64,
+        help="mini_batch_size for CachedMultipleNegativesRankingLoss when --train-base-loss=cached_mnrl.",
+    )
     parser.add_argument("--seed", type=int, default=12)
     parser.add_argument("--num-train-samples", type=int, default=100_000)
     parser.add_argument("--num-eval-samples", type=int, default=10_000)
@@ -494,7 +507,13 @@ def main() -> None:
 
     if not args.skip_train:
         logger.info("Starting training")
-        base_loss = MultipleNegativesRankingLoss(model)
+        if args.train_base_loss == "cached_mnrl":
+            base_loss = CachedMultipleNegativesRankingLoss(
+                model,
+                mini_batch_size=args.cached_mnrl_mini_batch_size,
+            )
+        else:
+            base_loss = MultipleNegativesRankingLoss(model)
         if args.train_loss == "qat":
             loss = losses.QuantizationAwareLoss(
                 model=model,
@@ -602,6 +621,8 @@ def main() -> None:
             "disable_flash_attn_package": args.disable_flash_attn_package,
             "trust_remote_code": args.trust_remote_code,
             "train_loss": args.train_loss,
+            "train_base_loss": args.train_base_loss,
+            "cached_mnrl_mini_batch_size": args.cached_mnrl_mini_batch_size,
             "num_train_samples": args.num_train_samples,
             "num_eval_samples": args.num_eval_samples,
             "train_batch_size": args.train_batch_size,
