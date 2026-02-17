@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-"""Run NanoBEIR + optional custom Nano evaluation in one command.
+"""Run Nano evaluations with per-split JSON cache.
 
 Tips:
+- Cache key is file existence only. If you change prompts, dtype, batch size, or
+  other evaluation parameters, remove cached JSON files (or use --override) to
+  force re-evaluation.
 - When datasets/models are already cached locally and you run large evaluations,
   setting `HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1` can reduce Hugging Face API
   calls and improve startup/evaluation stability.
@@ -12,17 +15,21 @@ import argparse
 import json
 import logging
 import time
+from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from collections.abc import Iterable
 from typing import Any
 
 import numpy as np
 import torch
 
 from sentence_transformers import SentenceTransformer
-from sentence_transformers.evaluation import NanoBEIREvaluator, NanoEvaluator, SentenceEvaluator, SequentialEvaluator
+from sentence_transformers.evaluation import NanoBEIREvaluator, NanoEvaluator
+from sentence_transformers.evaluation.InformationRetrievalEvaluator import InformationRetrievalEvaluator
+from sentence_transformers.evaluation.NanoBEIREvaluator import DATASET_NAME_TO_HUMAN_READABLE
 from sentence_transformers.model_card import get_versions
+from sentence_transformers.util import is_datasets_available
 
 logger = logging.getLogger(__name__)
 
@@ -54,64 +61,23 @@ COLLECTION_ALIASES: dict[str, str] = {
     "multilingualnanobeir": "mnanobeir",
 }
 
-NANOBEIR_DATASET_ID_TO_HUMAN_READABLE_PREFIX: dict[str, str] = {
-    "sentence-transformers/NanoBEIR-en": "MNanoBEIR_en",
-    "lightonai/NanoBEIR-ar": "MNanoBEIR_ar",
-    "lightonai/NanoBEIR-de": "MNanoBEIR_de",
-    "lightonai/NanoBEIR-es": "MNanoBEIR_es",
-    "lightonai/NanoBEIR-it": "MNanoBEIR_it",
-    "lightonai/NanoBEIR-fr": "MNanoBEIR_fr",
-    "lightonai/NanoBEIR-pt": "MNanoBEIR_pt",
-    "lightonai/NanoBEIR-no": "MNanoBEIR_no",
-    "lightonai/NanoBEIR-sv": "MNanoBEIR_sv",
-    "Serbian-AI-Society/NanoBEIR-sr": "MNanoBEIR_sr",
-    "LiquidAI/NanoBEIR-ko": "MNanoBEIR_ko",
-    "LiquidAI/NanoBEIR-ja": "MNanoBEIR_ja",
-    "sionic-ai/NanoBEIR-vi": "MNanoBEIR_vi",
-    "sionic-ai/NanoBEIR-th": "MNanoBEIR_th",
-    "hotchpotch/NanoMIRACL": "NanoMIRACL",
-    "hotchpotch/NanoCodeSearchNet": "NanoCodeSearchNet",
-}
-
 COLLECTION_TO_EVALUATOR_KIND: dict[str, str] = {
     "nanobeir": "nanobeir",
     "mnanobeir": "nanobeir",
 }
 
 
-class PrefixedEvaluator(SentenceEvaluator):
-    """Prefix evaluator metrics to avoid key collisions in SequentialEvaluator."""
-
-    def __init__(self, evaluator: SentenceEvaluator, prefix: str) -> None:
-        super().__init__()
-        self.evaluator = evaluator
-        self.prefix = prefix
-
-    def __call__(
-        self,
-        model: SentenceTransformer,
-        output_path: str | None = None,
-        epoch: int = -1,
-        steps: int = -1,
-    ) -> dict[str, float]:
-        metrics = self.evaluator(model, output_path=output_path, epoch=epoch, steps=steps)
-        if not isinstance(metrics, dict):
-            raise ValueError("PrefixedEvaluator requires an evaluator that returns dict metrics.")
-
-        prefixed_metrics = {f"{self.prefix}_{key}": value for key, value in metrics.items()}
-
-        base_primary_metric = getattr(self.evaluator, "primary_metric", None)
-        if base_primary_metric and base_primary_metric in metrics:
-            self.primary_metric = f"{self.prefix}_{base_primary_metric}"
-        elif prefixed_metrics:
-            self.primary_metric = next(iter(prefixed_metrics.keys()))
-
-        return prefixed_metrics
+@dataclass(frozen=True)
+class EvalTask:
+    evaluator_kind: str
+    dataset_id: str
+    target_name: str
+    split_name: str
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Evaluate a SentenceTransformer on NanoBEIR collections and an optional custom Nano dataset"
+        description="Evaluate a SentenceTransformer on Nano datasets with split-level JSON cache"
     )
     parser.add_argument("--model", required=True, help="Model name or local path")
     parser.add_argument(
@@ -158,8 +124,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Optional generic NanoEvaluator dataset id(s), repeatable or comma-separated. "
-            "Useful when you want to evaluate datasets directly without --collection "
-            "(e.g. -d hotchpotch/NanoCodeSearchNet,hotchpotch/NanoMIRACL)."
+            "Example: -d hotchpotch/NanoCodeSearchNet,hotchpotch/NanoMIRACL"
         ),
     )
     parser.add_argument(
@@ -169,7 +134,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "NanoBEIR split target(s) like msmarco,nq. Repeatable and comma-separated. "
-            "Applies to all selected collections."
+            "Applies to NanoBEIR collection entries."
         ),
     )
     parser.add_argument(
@@ -181,12 +146,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--extra-dataset-id",
         default=None,
-        help="Optional extra Nano-style dataset id for generic NanoEvaluator (e.g. hotchpotch/NanoCodeSearchNet).",
+        help="Deprecated alias for adding one generic Nano dataset id.",
     )
     parser.add_argument(
         "--extra-splits",
         default=None,
-        help="Comma-separated split names for --extra-dataset-id. If omitted, all query splits are used.",
+        help="Optional split filter for --extra-dataset-id (comma-separated).",
     )
 
     parser.add_argument("--batch-size", type=int, default=32)
@@ -195,16 +160,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--corpus-prompt", default=None)
     parser.add_argument(
         "--output-dir",
-        default="output",
-        help=(
-            "Base output directory. Evaluation files are saved to "
-            "{output-dir}/{model_name}-{collection_or_dataset_suffix}/."
-        ),
+        default="output/nano_eval",
+        help="Base output directory. Results are saved to {output-dir}/{model_name}/.",
     )
+    parser.add_argument("--override", action="store_true", help="Re-run evaluations even if split JSON cache exists.")
     parser.add_argument(
-        "--no-evaluator-csv",
-        action="store_true",
-        help="Disable sentence-transformers evaluator CSV outputs.",
+        "--aggregate-metric",
+        default="ndcg@10",
+        help="Metric suffix used for split/all aggregate scoring (default: ndcg@10).",
     )
     return parser.parse_args()
 
@@ -264,9 +227,13 @@ def resolve_collection_dataset_entries(args: argparse.Namespace) -> list[tuple[s
     if args.nanobeir_dataset_id is not None:
         for dataset_id in parse_csv(args.nanobeir_dataset_id):
             entries.append(("nanobeir", dataset_id))
+
     if args.dataset_id is not None:
         for dataset_id in parse_repeated_csv(args.dataset_id):
             entries.append(("nano", dataset_id))
+
+    if args.extra_dataset_id is not None:
+        entries.append(("nano", args.extra_dataset_id))
 
     if not entries:
         entries = [("nanobeir", "sentence-transformers/NanoBEIR-en")]
@@ -281,9 +248,9 @@ def resolve_collection_dataset_entries(args: argparse.Namespace) -> list[tuple[s
     return deduped
 
 
-def resolve_split_targets(args: argparse.Namespace, collection_entries: list[tuple[str, str]]) -> list[str] | None:
-    has_nanobeir = any(kind == "nanobeir" for kind, _ in collection_entries)
-    has_non_nanobeir = any(kind != "nanobeir" for kind, _ in collection_entries)
+def resolve_nanobeir_split_targets(args: argparse.Namespace, entries: list[tuple[str, str]]) -> list[str] | None:
+    has_nanobeir = any(kind == "nanobeir" for kind, _ in entries)
+    has_non_nanobeir = any(kind != "nanobeir" for kind, _ in entries)
 
     split_targets = parse_repeated_csv(args.split_target)
     if split_targets:
@@ -293,61 +260,62 @@ def resolve_split_targets(args: argparse.Namespace, collection_entries: list[tup
     if fallback_targets:
         return fallback_targets
 
-    # Keep historical default split-targets for NanoBEIR-only runs.
+    # Keep historical default for NanoBEIR-only runs.
     if has_nanobeir and not has_non_nanobeir:
         return ["msmarco", "nq"]
     return None
 
 
-def dataset_id_to_prefix(dataset_id: str) -> str:
-    if dataset_id in NANOBEIR_DATASET_ID_TO_HUMAN_READABLE_PREFIX:
-        return NANOBEIR_DATASET_ID_TO_HUMAN_READABLE_PREFIX[dataset_id]
-    return dataset_id.replace("/", "__").replace("-", "_")
+def _resolve_query_splits(dataset_id: str) -> list[str]:
+    if not is_datasets_available():
+        raise ValueError("datasets is not available. Install it to evaluate Nano datasets.")
+
+    from datasets import get_dataset_split_names
+
+    split_names = get_dataset_split_names(dataset_id, "queries")
+    if not split_names:
+        raise ValueError(f"No query splits were found for dataset '{dataset_id}'.")
+    return list(split_names)
 
 
-def build_evaluators(args: argparse.Namespace) -> list[SentenceEvaluator]:
-    collection_entries = resolve_collection_dataset_entries(args)
-    split_targets = resolve_split_targets(args, collection_entries)
-    extra_splits = parse_csv(args.extra_splits)
-    write_evaluator_csv = not args.no_evaluator_csv
+def resolve_tasks(args: argparse.Namespace) -> list[EvalTask]:
+    entries = resolve_collection_dataset_entries(args)
+    nanobeir_split_targets = resolve_nanobeir_split_targets(args, entries)
+    all_nanobeir_splits = list(DATASET_NAME_TO_HUMAN_READABLE.keys())
+    extra_dataset_splits = set(parse_csv(args.extra_splits)) if args.extra_splits else None
 
-    evaluators: list[SentenceEvaluator] = []
-    for evaluator_kind, dataset_id in collection_entries:
+    tasks: list[EvalTask] = []
+    for evaluator_kind, dataset_id in entries:
+        target_name = dataset_id.split("/")[-1]
         if evaluator_kind == "nanobeir":
-            evaluator = NanoBEIREvaluator(
-                dataset_names=split_targets,
-                dataset_id=dataset_id,
-                batch_size=args.batch_size,
-                show_progress_bar=args.show_progress,
-                write_csv=write_evaluator_csv,
-                query_prompts=args.query_prompt,
-                corpus_prompts=args.corpus_prompt,
-            )
+            split_names = nanobeir_split_targets if nanobeir_split_targets is not None else all_nanobeir_splits
         else:
-            evaluator = NanoEvaluator(
-                dataset_names=split_targets or None,
-                dataset_id=dataset_id,
-                batch_size=args.batch_size,
-                show_progress_bar=args.show_progress,
-                write_csv=write_evaluator_csv,
-                query_prompts=args.query_prompt,
-                corpus_prompts=args.corpus_prompt,
+            split_names = _resolve_query_splits(dataset_id)
+            if extra_dataset_splits and args.extra_dataset_id == dataset_id:
+                split_names = [split_name for split_name in split_names if split_name in extra_dataset_splits]
+
+        for split_name in split_names:
+            tasks.append(
+                EvalTask(
+                    evaluator_kind=evaluator_kind,
+                    dataset_id=dataset_id,
+                    target_name=target_name,
+                    split_name=split_name,
+                )
             )
-        evaluators.append(PrefixedEvaluator(evaluator, prefix=dataset_id_to_prefix(dataset_id)))
 
-    if args.extra_dataset_id is not None:
-        extra_evaluator = NanoEvaluator(
-            dataset_names=extra_splits or None,
-            dataset_id=args.extra_dataset_id,
-            batch_size=args.batch_size,
-            show_progress_bar=args.show_progress,
-            write_csv=write_evaluator_csv,
-            query_prompts=args.query_prompt,
-            corpus_prompts=args.corpus_prompt,
-        )
-        evaluators.append(extra_evaluator)
+    deduped: list[EvalTask] = []
+    seen: set[tuple[str, str, str]] = set()
+    for task in tasks:
+        key = (task.evaluator_kind, task.dataset_id, task.split_name)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(task)
 
-    return evaluators
+    if not deduped:
+        raise ValueError("No evaluation tasks were resolved from the given arguments.")
+    return deduped
 
 
 def _resolve_dtype(dtype: str) -> torch.dtype:
@@ -450,35 +418,8 @@ def _print_effective_prompts(prompt_info: dict[str, str | None]) -> None:
         print("doc prompt [none]: None")
 
 
-def _collect_eval_plan(args: argparse.Namespace) -> dict[str, Any]:
-    collection_entries = resolve_collection_dataset_entries(args)
-    split_targets = resolve_split_targets(args, collection_entries)
-    plan: dict[str, Any] = {
-        "collection_entries": [
-            {"evaluator_kind": kind, "dataset_id": dataset_id} for kind, dataset_id in collection_entries
-        ],
-        "split_targets": split_targets,
-    }
-    if args.extra_dataset_id is not None:
-        plan["extra_dataset_id"] = args.extra_dataset_id
-        plan["extra_splits"] = parse_csv(args.extra_splits) or None
-    return plan
-
-
-def _print_eval_plan(plan: dict[str, Any]) -> None:
-    dataset_ids = [entry["dataset_id"] for entry in plan["collection_entries"]]
-    print(f"collection dataset ids: {dataset_ids}")
-    split_targets = plan["split_targets"]
-    print(f"split targets: {split_targets if split_targets is not None else 'all'}")
-    extra_dataset_id = plan.get("extra_dataset_id")
-    if extra_dataset_id is not None:
-        extra_splits = plan.get("extra_splits")
-        print(f"extra dataset id: {extra_dataset_id}")
-        print(f"extra splits: {extra_splits if extra_splits else 'all'}")
-
-
-def _normalize_metrics(metrics: dict[str, Any]) -> dict[str, float]:
-    return {key: float(value) for key, value in metrics.items()}
+def _sanitize_output_part(value: str) -> str:
+    return "".join(char if char.isalnum() or char in {"-", "_", "."} else "_" for char in value)
 
 
 def _resolve_model_output_name(model_name_or_path: str) -> str:
@@ -486,148 +427,132 @@ def _resolve_model_output_name(model_name_or_path: str) -> str:
     if not normalized:
         return "model"
     model_name = normalized.replace("\\", "/").split("/")[-1]
-    safe_name = "".join(char if char.isalnum() or char in {"-", "_", "."} else "_" for char in model_name)
+    safe_name = _sanitize_output_part(model_name)
     return safe_name or "model"
 
 
-def _sanitize_output_part(value: str) -> str:
-    return "".join(char if char.isalnum() or char in {"-", "_", "."} else "_" for char in value)
-
-
-def _resolve_target_output_suffix(args: argparse.Namespace) -> str:
-    parts: list[str] = []
-
-    collection_names = resolve_collections(args.collection)
-    if collection_names:
-        parts.extend(collection_names)
-
-    collection_entries = resolve_collection_dataset_entries(args)
-    split_targets = resolve_split_targets(args, collection_entries)
-    if split_targets:
-        parts.extend(split_targets)
-
-    explicit_dataset_ids: list[str] = []
-    if args.nanobeir_dataset_id is not None:
-        explicit_dataset_ids.extend(parse_csv(args.nanobeir_dataset_id))
-    if args.dataset_id is not None:
-        explicit_dataset_ids.extend(parse_repeated_csv(args.dataset_id))
-    if args.extra_dataset_id is not None:
-        explicit_dataset_ids.append(args.extra_dataset_id)
-    if explicit_dataset_ids:
-        parts.extend(dataset_id_to_prefix(dataset_id) for dataset_id in explicit_dataset_ids)
-
-    deduped: list[str] = []
-    seen: set[str] = set()
-    for part in parts:
-        if part in seen:
-            continue
-        seen.add(part)
-        deduped.append(part)
-
-    if not deduped:
-        return "default"
-    return "_".join(_sanitize_output_part(part) for part in deduped)
-
-
-def _resolve_output_dir(args: argparse.Namespace) -> Path:
-    model_name = _resolve_model_output_name(args.model)
-    target_suffix = _resolve_target_output_suffix(args)
-    output_dir = Path(args.output_dir) / f"{model_name}-{target_suffix}"
+def _resolve_model_output_dir(args: argparse.Namespace) -> Path:
+    output_dir = Path(args.output_dir) / _resolve_model_output_name(args.model)
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
 
 
-def _write_eval_json(output_dir: Path, payload: dict[str, Any]) -> Path:
-    json_path = output_dir / "eval.json"
-    json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    return json_path
+def _resolve_split_output_path(model_output_dir: Path, task: EvalTask) -> Path:
+    target_dir = model_output_dir / "evals" / _sanitize_output_part(task.target_name)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    split_file_name = f"{_sanitize_output_part(task.split_name)}.json"
+    return target_dir / split_file_name
 
 
-def _write_eval_csv(output_dir: Path, metrics: dict[str, float]) -> Path:
-    csv_path = output_dir / "eval.csv"
-    lines = ["metric,value"]
-    for key in sorted(metrics):
-        lines.append(f"{key},{metrics[key]}")
-    csv_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return csv_path
+def _normalize_metrics(metrics: dict[str, Any]) -> dict[str, float]:
+    return {key: float(value) for key, value in metrics.items()}
 
 
-def _write_eval_markdown(
-    output_dir: Path,
-    model_name: str,
-    primary_metric: str | None,
-    primary_metric_value: float | None,
-    metrics: dict[str, float],
-) -> Path:
-    markdown_path = output_dir / "eval.md"
-    lines = [
-        "# Evaluation Result",
-        "",
-        f"- model: `{model_name}`",
-        f"- primary_metric: `{primary_metric}`",
-        f"- primary_metric_value: `{primary_metric_value}`",
-        "",
-        "| metric | value |",
-        "| --- | ---: |",
-    ]
-    for key in sorted(metrics):
-        lines.append(f"| `{key}` | {metrics[key]} |")
-    markdown_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return markdown_path
+def _extract_metric_values(metrics: dict[str, float], metric_suffix: str) -> list[float]:
+    return [value for key, value in metrics.items() if key.endswith(metric_suffix)]
+
+
+def _compute_aggregate_metric_value(metrics: dict[str, float], metric_suffix: str) -> float:
+    candidates = _extract_metric_values(metrics, metric_suffix)
+    if not candidates:
+        raise ValueError(
+            f"Could not find any metric ending with '{metric_suffix}'. "
+            f"Available metric keys include: {list(metrics.keys())[:10]}"
+        )
+    return float(np.mean(candidates))
 
 
 def _collect_runtime_environment() -> dict[str, Any]:
-    environment: dict[str, Any] = {
-        "package_versions": get_versions(),
-        "cuda": {
-            "is_available": torch.cuda.is_available(),
-            "cuda_version": torch.version.cuda,
-            "cudnn_version": torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else None,
-            "device_count": torch.cuda.device_count(),
-            "devices": [],
-            "current_device_index": None,
-            "current_device_name": None,
-        },
+    cuda_info: dict[str, Any] = {
+        "is_available": torch.cuda.is_available(),
+        "cuda_version": torch.version.cuda,
+        "cudnn_version": torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else None,
+        "device_count": torch.cuda.device_count(),
+        "devices": [],
+        "current_device_index": None,
+        "current_device_name": None,
     }
 
     if torch.cuda.is_available():
         current_index = torch.cuda.current_device()
-        environment["cuda"]["current_device_index"] = current_index
-        environment["cuda"]["current_device_name"] = torch.cuda.get_device_name(current_index)
-        environment["cuda"]["devices"] = [
+        cuda_info["current_device_index"] = current_index
+        cuda_info["current_device_name"] = torch.cuda.get_device_name(current_index)
+        cuda_info["devices"] = [
             {"index": index, "name": torch.cuda.get_device_name(index)} for index in range(torch.cuda.device_count())
         ]
 
-    return environment
+    return {
+        "package_versions": get_versions(),
+        "cuda": cuda_info,
+    }
 
 
-def main() -> None:
-    args = parse_args()
-    model = load_model(args)
-    output_dir = _resolve_output_dir(args)
-    prompt_info = _resolve_effective_prompts(model, args)
-    _print_effective_prompts(prompt_info)
-    eval_plan = _collect_eval_plan(args)
-    _print_eval_plan(eval_plan)
+def _create_ir_evaluator(task: EvalTask, args: argparse.Namespace) -> InformationRetrievalEvaluator:
+    common_kwargs: dict[str, Any] = {
+        "batch_size": args.batch_size,
+        "show_progress_bar": args.show_progress,
+        "write_csv": False,
+        "query_prompts": args.query_prompt,
+        "corpus_prompts": args.corpus_prompt,
+    }
 
-    evaluators = build_evaluators(args)
-    sequential = SequentialEvaluator(
-        evaluators,
-        main_score_function=lambda scores: float(np.mean(scores)),
-    )
+    if task.evaluator_kind == "nanobeir":
+        wrapper = NanoBEIREvaluator(
+            dataset_names=[task.split_name],
+            dataset_id=task.dataset_id,
+            **common_kwargs,
+        )
+    else:
+        wrapper = NanoEvaluator(
+            dataset_names=[task.split_name],
+            dataset_id=task.dataset_id,
+            **common_kwargs,
+        )
+
+    if len(wrapper.evaluators) != 1:
+        raise ValueError(f"Expected exactly one IR evaluator for task {task}, got {len(wrapper.evaluators)}")
+    return wrapper.evaluators[0]
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _run_or_load_split(
+    task: EvalTask,
+    model: SentenceTransformer,
+    args: argparse.Namespace,
+    prompt_info: dict[str, str | None],
+    model_output_dir: Path,
+    environment: dict[str, Any],
+) -> dict[str, Any]:
+    output_path = _resolve_split_output_path(model_output_dir, task)
+
+    if output_path.exists() and not args.override:
+        print(f"cache hit: {task.target_name}/{task.split_name} -> {output_path}")
+        payload = json.loads(output_path.read_text(encoding="utf-8"))
+        return {
+            "cache_hit": True,
+            "output_path": str(output_path),
+            "payload": payload,
+        }
+
+    print(f"evaluating: {task.target_name}/{task.split_name}")
+    ir_evaluator = _create_ir_evaluator(task, args)
 
     eval_started_at_utc = datetime.now(timezone.utc)
     eval_start = time.perf_counter()
-    metrics = _normalize_metrics(sequential(model, output_path=str(output_dir)))
-    eval_duration_seconds = time.perf_counter() - eval_start
+    metrics = _normalize_metrics(ir_evaluator(model, output_path=None))
+    eval_elapsed_seconds = time.perf_counter() - eval_start
     eval_finished_at_utc = datetime.now(timezone.utc)
 
-    ndcg_metrics = {key: value for key, value in metrics.items() if "ndcg@10" in key}
-    if not ndcg_metrics:
-        logger.warning("No ndcg@10 metrics were found in the evaluation output.")
+    timing = {key: float(value) for key, value in ir_evaluator.last_timing.items()}
+    if "pure_compute_seconds" not in timing:
+        timing["pure_compute_seconds"] = float(eval_elapsed_seconds)
 
-    primary_metric = sequential.primary_metric
-    primary_metric_value = float(metrics[primary_metric]) if primary_metric in metrics else None
+    aggregate_metric_value = _compute_aggregate_metric_value(metrics, args.aggregate_metric)
+
     payload: dict[str, Any] = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "model": {
@@ -639,36 +564,176 @@ def main() -> None:
             "max_seq_length": model.max_seq_length,
             "similarity_fn_name": model.similarity_fn_name,
         },
-        "environment": _collect_runtime_environment(),
-        "cli_args": vars(args),
+        "environment": environment,
         "prompts": prompt_info,
-        "evaluation_plan": eval_plan,
-        "evaluation": {
+        "target": {
+            "dataset_id": task.dataset_id,
+            "target_name": task.target_name,
+            "evaluator_kind": task.evaluator_kind,
+            "split_name": task.split_name,
+        },
+        "config": {
             "batch_size": args.batch_size,
-            "duration_seconds_excluding_dataset_load": eval_duration_seconds,
+            "aggregate_metric": args.aggregate_metric,
+            "show_progress": args.show_progress,
+        },
+        "evaluation": {
             "started_at_utc": eval_started_at_utc.isoformat(),
             "finished_at_utc": eval_finished_at_utc.isoformat(),
             "evaluated_at_utc": eval_finished_at_utc.isoformat(),
+            "duration_seconds_excluding_dataset_load": float(timing["pure_compute_seconds"]),
+            "aggregate_metric": args.aggregate_metric,
+            "aggregate_metric_value": aggregate_metric_value,
+            "timing": timing,
         },
-        "primary_metric": primary_metric,
-        "primary_metric_value": primary_metric_value,
         "metrics": metrics,
-        "ndcg_at_10_metrics": ndcg_metrics,
     }
-    json_path = _write_eval_json(output_dir, payload)
-    csv_path = _write_eval_csv(output_dir, metrics)
-    markdown_path = _write_eval_markdown(output_dir, args.model, primary_metric, primary_metric_value, metrics)
-    output_paths = {
-        "eval_json": str(json_path),
-        "eval_csv": str(csv_path),
-        "eval_md": str(markdown_path),
+    _write_json(output_path, payload)
+
+    return {
+        "cache_hit": False,
+        "output_path": str(output_path),
+        "payload": payload,
     }
+
+
+def _build_all_payload(
+    model: SentenceTransformer,
+    args: argparse.Namespace,
+    prompt_info: dict[str, str | None],
+    environment: dict[str, Any],
+    split_results: list[dict[str, Any]],
+) -> dict[str, Any]:
+    split_entries: list[dict[str, Any]] = []
+    aggregate_metric_values: list[float] = []
+
+    timing_keys = [
+        "query_embedding_seconds",
+        "corpus_embedding_seconds",
+        "score_and_topk_seconds",
+        "metric_compute_seconds",
+        "pure_compute_seconds",
+    ]
+    timing_totals: dict[str, float] = {key: 0.0 for key in timing_keys}
+
+    for result in split_results:
+        payload = result["payload"]
+        evaluation = payload.get("evaluation", {})
+        timing = evaluation.get("timing", {})
+        aggregate_metric_value = evaluation.get("aggregate_metric_value")
+
+        if isinstance(aggregate_metric_value, (int, float)):
+            aggregate_metric_values.append(float(aggregate_metric_value))
+
+        for key in timing_keys:
+            value = timing.get(key)
+            if isinstance(value, (int, float)):
+                timing_totals[key] += float(value)
+
+        split_entry = {
+            "target_name": payload.get("target", {}).get("target_name"),
+            "dataset_id": payload.get("target", {}).get("dataset_id"),
+            "split_name": payload.get("target", {}).get("split_name"),
+            "evaluator_kind": payload.get("target", {}).get("evaluator_kind"),
+            "cache_hit": bool(result["cache_hit"]),
+            "result_path": result["output_path"],
+            "aggregate_metric": evaluation.get("aggregate_metric"),
+            "aggregate_metric_value": aggregate_metric_value,
+            "duration_seconds_excluding_dataset_load": evaluation.get("duration_seconds_excluding_dataset_load"),
+            "evaluated_at_utc": evaluation.get("evaluated_at_utc"),
+        }
+        split_entries.append(split_entry)
+
+    split_entries.sort(key=lambda item: (str(item["target_name"]), str(item["split_name"])))
+
+    target_buckets: dict[str, list[float]] = {}
+    for entry in split_entries:
+        value = entry.get("aggregate_metric_value")
+        if not isinstance(value, (int, float)):
+            continue
+        target_name = str(entry["target_name"])
+        target_buckets.setdefault(target_name, []).append(float(value))
+
+    target_summaries: dict[str, dict[str, Any]] = {}
+    for target_name, values in sorted(target_buckets.items()):
+        target_summaries[target_name] = {
+            "split_count": len(values),
+            "aggregate_metric": args.aggregate_metric,
+            "aggregate_metric_mean": float(np.mean(values)),
+        }
+
+    all_payload: dict[str, Any] = {
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "model": {
+            "name_or_path": args.model,
+            "device": args.device,
+            "dtype": args.dtype,
+            "attn_implementation": _resolve_attn_implementation(args),
+            "trust_remote_code": args.trust_remote_code,
+            "max_seq_length": model.max_seq_length,
+            "similarity_fn_name": model.similarity_fn_name,
+        },
+        "environment": environment,
+        "cli_args": vars(args),
+        "prompts": prompt_info,
+        "aggregate_metric": args.aggregate_metric,
+        "totals": {
+            "target_count": len({entry["target_name"] for entry in split_entries}),
+            "split_count": len(split_entries),
+            "aggregate_metric_mean": float(np.mean(aggregate_metric_values)) if aggregate_metric_values else None,
+            "cache_hit_count": sum(1 for entry in split_entries if entry["cache_hit"]),
+            "evaluated_count": sum(1 for entry in split_entries if not entry["cache_hit"]),
+            "timing_seconds": timing_totals,
+            "total_duration_seconds_excluding_dataset_load": timing_totals["pure_compute_seconds"],
+        },
+        "target_summaries": target_summaries,
+        "splits": split_entries,
+    }
+    return all_payload
+
+
+def _print_eval_plan(tasks: list[EvalTask]) -> None:
+    by_target: dict[str, list[str]] = {}
+    for task in tasks:
+        by_target.setdefault(task.target_name, []).append(task.split_name)
+
+    print(f"resolved tasks: {len(tasks)} splits across {len(by_target)} targets")
+    for target_name, split_names in sorted(by_target.items()):
+        print(f"- {target_name}: {len(split_names)} splits")
+
+
+def main() -> None:
+    args = parse_args()
+    model = load_model(args)
+    prompt_info = _resolve_effective_prompts(model, args)
+    _print_effective_prompts(prompt_info)
+
+    tasks = resolve_tasks(args)
+    _print_eval_plan(tasks)
+
+    model_output_dir = _resolve_model_output_dir(args)
+    environment = _collect_runtime_environment()
+
+    split_results: list[dict[str, Any]] = []
+    for task in tasks:
+        split_results.append(_run_or_load_split(task, model, args, prompt_info, model_output_dir, environment))
+
+    all_payload = _build_all_payload(model, args, prompt_info, environment, split_results)
+    all_output_path = model_output_dir / "all.json"
+    _write_json(all_output_path, all_payload)
 
     print(
         json.dumps(
-            {"primary_metric": primary_metric, "metrics": ndcg_metrics, "output_files": output_paths},
-            indent=2,
+            {
+                "aggregate_metric": args.aggregate_metric,
+                "aggregate_metric_mean": all_payload["totals"]["aggregate_metric_mean"],
+                "total_duration_seconds_excluding_dataset_load": all_payload["totals"][
+                    "total_duration_seconds_excluding_dataset_load"
+                ],
+                "all_json": str(all_output_path),
+            },
             ensure_ascii=False,
+            indent=2,
         )
     )
 

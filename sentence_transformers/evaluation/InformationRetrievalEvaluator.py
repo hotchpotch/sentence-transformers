@@ -4,6 +4,7 @@ import heapq
 import json
 import logging
 import os
+import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -190,6 +191,8 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
         self.write_predictions = write_predictions
         if self.write_predictions:
             self.predictions_file = "Information-Retrieval_evaluation" + name + "_predictions.jsonl"
+        # Runtime timings for this evaluator call, populated in `compute_metrices`.
+        self.last_timing: dict[str, float] = {}
 
     def _append_csv_headers(self, score_function_names):
         for score_name in score_function_names:
@@ -298,6 +301,8 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
         corpus_embeddings: Tensor | None = None,
         output_path: str | None = None,
     ) -> dict[str, float]:
+        compute_start = time.perf_counter()
+
         if corpus_model is None:
             corpus_model = model
 
@@ -310,6 +315,7 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
         )
 
         # Compute embedding for the queries
+        query_embed_start = time.perf_counter()
         query_embeddings = self.embed_inputs(
             model,
             self.queries,
@@ -317,10 +323,14 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
             prompt_name=self.query_prompt_name,
             prompt=self.query_prompt,
         )
+        query_embedding_seconds = time.perf_counter() - query_embed_start
 
         queries_result_list = {}
         for name in self.score_functions:
             queries_result_list[name] = [[] for _ in range(len(query_embeddings))]
+
+        corpus_embedding_seconds = 0.0
+        score_and_topk_seconds = 0.0
 
         # Iterate over chunks of the corpus
         for corpus_start_idx in trange(
@@ -330,6 +340,7 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
 
             # Encode chunk of corpus
             if corpus_embeddings is None:
+                corpus_embed_start = time.perf_counter()
                 sub_corpus_embeddings = self.embed_inputs(
                     corpus_model,
                     self.corpus[corpus_start_idx:corpus_end_idx],
@@ -337,11 +348,13 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
                     prompt_name=self.corpus_prompt_name,
                     prompt=self.corpus_prompt,
                 )
+                corpus_embedding_seconds += time.perf_counter() - corpus_embed_start
             else:
                 sub_corpus_embeddings = corpus_embeddings[corpus_start_idx:corpus_end_idx]
 
             # Compute cosine similarites
             for name, score_function in self.score_functions.items():
+                score_start = time.perf_counter()
                 pair_scores = score_function(query_embeddings, sub_corpus_embeddings)
 
                 # Get top-k values
@@ -366,14 +379,19 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
                             heapq.heappush(queries_result_list[name][query_itr], (score, corpus_id))
                         else:
                             heapq.heappushpop(queries_result_list[name][query_itr], (score, corpus_id))
+                score_and_topk_seconds += time.perf_counter() - score_start
 
+        postprocess_start = time.perf_counter()
         for name in queries_result_list:
             for query_itr in range(len(queries_result_list[name])):
                 for doc_itr in range(len(queries_result_list[name][query_itr])):
                     score, corpus_id = queries_result_list[name][query_itr][doc_itr]
                     queries_result_list[name][query_itr][doc_itr] = {"corpus_id": corpus_id, "score": score}
+        postprocess_seconds = time.perf_counter() - postprocess_start
 
+        prediction_write_seconds = 0.0
         if self.write_predictions and output_path is not None:
+            prediction_write_start = time.perf_counter()
             for name in queries_result_list:
                 base_filename = self.predictions_file.replace(".jsonl", f"_{name}.jsonl")
                 json_path = os.path.join(output_path, base_filename)
@@ -395,12 +413,30 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
                         }
 
                         fOut.write(json.dumps(prediction) + "\n")
+            prediction_write_seconds = time.perf_counter() - prediction_write_start
 
         logger.info(f"Queries: {len(self.queries)}")
         logger.info(f"Corpus: {len(self.corpus)}\n")
 
         # Compute scores
+        metric_compute_start = time.perf_counter()
         scores = {name: self.compute_metrics(queries_result_list[name]) for name in self.score_functions}
+        metric_compute_seconds = time.perf_counter() - metric_compute_start
+
+        pure_compute_seconds = (
+            query_embedding_seconds + corpus_embedding_seconds + score_and_topk_seconds + metric_compute_seconds
+        )
+        total_compute_seconds = time.perf_counter() - compute_start
+        self.last_timing = {
+            "query_embedding_seconds": query_embedding_seconds,
+            "corpus_embedding_seconds": corpus_embedding_seconds,
+            "score_and_topk_seconds": score_and_topk_seconds,
+            "metric_compute_seconds": metric_compute_seconds,
+            "postprocess_seconds": postprocess_seconds,
+            "prediction_write_seconds": prediction_write_seconds,
+            "pure_compute_seconds": pure_compute_seconds,
+            "total_compute_seconds": total_compute_seconds,
+        }
 
         # Output
         for name in self.score_function_names:
