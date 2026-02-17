@@ -127,7 +127,7 @@ def patch_cross_nano_eval(monkeypatch: pytest.MonkeyPatch, fake_datasets_module:
     )
 
 
-def test_cross_encoder_nano_evaluator_auto_expand_with_custom_bm25_subset(
+def test_cross_encoder_nano_evaluator_auto_expand_with_custom_candidate_subset(
     patch_cross_nano_eval: None,
     dummy_cross_encoder: Any,
 ) -> None:
@@ -135,7 +135,7 @@ def test_cross_encoder_nano_evaluator_auto_expand_with_custom_bm25_subset(
         dataset_names=None,
         dataset_id="hotchpotch/NanoCodeSearchNet",
         write_csv=False,
-        bm25_subset_name="dense",
+        candidate_subset_name="dense",
         retrieved_corpus_ids_column="retrieved-ids",
     )
 
@@ -147,6 +147,22 @@ def test_cross_encoder_nano_evaluator_auto_expand_with_custom_bm25_subset(
 
     metrics = evaluator(dummy_cross_encoder)
     assert "NanoCodeSearchNet_R100_mean_ndcg@10" in metrics
+
+
+def test_cross_encoder_nano_evaluator_bm25_alias_keeps_backward_compatibility(
+    patch_cross_nano_eval: None,
+    dummy_cross_encoder: Any,
+) -> None:
+    evaluator = CrossEncoderNanoEvaluator(
+        dataset_names=["python"],
+        dataset_id="hotchpotch/NanoCodeSearchNet",
+        write_csv=False,
+        bm25_subset_name="dense",
+        retrieved_corpus_ids_column="retrieved-ids",
+    )
+    assert evaluator.candidate_subset_name == "dense"
+    metrics = evaluator(dummy_cross_encoder)
+    assert "NanoCodeSearchNet_python_R100_ndcg@10" in metrics
 
 
 def test_cross_encoder_nano_evaluator_mapping_validates_split_exists(monkeypatch: pytest.MonkeyPatch) -> None:

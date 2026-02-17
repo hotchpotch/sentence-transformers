@@ -42,7 +42,8 @@ class CrossEncoderNanoEvaluator(SentenceEvaluator):
         corpus_subset_name: str = "corpus",
         queries_subset_name: str = "queries",
         qrels_subset_name: str = "qrels",
-        bm25_subset_name: str = "bm25",
+        candidate_subset_name: str = "bm25",
+        bm25_subset_name: str | None = None,
         retrieved_corpus_ids_column: str = "corpus-ids",
         name: str | None = None,
     ) -> None:
@@ -69,7 +70,18 @@ class CrossEncoderNanoEvaluator(SentenceEvaluator):
         self.corpus_subset_name = corpus_subset_name
         self.queries_subset_name = queries_subset_name
         self.qrels_subset_name = qrels_subset_name
-        self.bm25_subset_name = bm25_subset_name
+        if bm25_subset_name is not None:
+            if candidate_subset_name != "bm25" and bm25_subset_name != candidate_subset_name:
+                raise ValueError(
+                    "Received both candidate_subset_name and bm25_subset_name with different values. "
+                    "Please pass only candidate_subset_name."
+                )
+            logger.warning(
+                "The `bm25_subset_name` parameter is deprecated; please use "
+                f"`candidate_subset_name={bm25_subset_name!r}` instead."
+            )
+            candidate_subset_name = bm25_subset_name
+        self.candidate_subset_name = candidate_subset_name
         self.retrieved_corpus_ids_column = retrieved_corpus_ids_column
         self._subset_to_split_names_cache: dict[str, list[str]] = {}
 
@@ -240,7 +252,7 @@ class CrossEncoderNanoEvaluator(SentenceEvaluator):
             required_columns=["query-id", "corpus-id"],
         )
         retrieved = self._load_dataset_subset_split(
-            self.bm25_subset_name,
+            self.candidate_subset_name,
             split=split_name,
             required_columns=["query-id", self.retrieved_corpus_ids_column],
         )
@@ -353,7 +365,7 @@ class CrossEncoderNanoEvaluator(SentenceEvaluator):
             self._validate_split_exists(dataset_name, self.corpus_subset_name, split_name)
             self._validate_split_exists(dataset_name, self.queries_subset_name, split_name)
             self._validate_split_exists(dataset_name, self.qrels_subset_name, split_name)
-            self._validate_split_exists(dataset_name, self.bm25_subset_name, split_name)
+            self._validate_split_exists(dataset_name, self.candidate_subset_name, split_name)
 
     def _validate_dataset_names(self) -> None:
         if len(self.dataset_names) == 0:
@@ -392,7 +404,9 @@ class CrossEncoderNanoEvaluator(SentenceEvaluator):
             "corpus_subset_name": self.corpus_subset_name,
             "queries_subset_name": self.queries_subset_name,
             "qrels_subset_name": self.qrels_subset_name,
-            "bm25_subset_name": self.bm25_subset_name,
+            "candidate_subset_name": self.candidate_subset_name,
+            # Backward compatibility with historical serialized config keys.
+            "bm25_subset_name": self.candidate_subset_name,
             "retrieved_corpus_ids_column": self.retrieved_corpus_ids_column,
         }
 

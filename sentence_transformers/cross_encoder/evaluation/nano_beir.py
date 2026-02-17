@@ -55,7 +55,8 @@ class CrossEncoderNanoBEIREvaluator(CrossEncoderNanoEvaluator):
         write_csv: bool = True,
         aggregate_fn: Callable[[list[float]], float] = np.mean,
         aggregate_key: str = "mean",
-        bm25_subset_name: str = "bm25",
+        candidate_subset_name: str = "bm25",
+        bm25_subset_name: str | None = None,
         retrieved_corpus_ids_column: str = "corpus-ids",
     ) -> None:
         if dataset_names is None:
@@ -79,6 +80,7 @@ class CrossEncoderNanoBEIREvaluator(CrossEncoderNanoEvaluator):
             split_prefix="Nano",
             strict_dataset_name_validation=True,
             auto_expand_splits_when_dataset_names_none=False,
+            candidate_subset_name=candidate_subset_name,
             bm25_subset_name=bm25_subset_name,
             retrieved_corpus_ids_column=retrieved_corpus_ids_column,
             name="NanoBEIR",
@@ -106,6 +108,7 @@ class CrossEncoderNanoBEIREvaluator(CrossEncoderNanoEvaluator):
             "rerank_k": self.rerank_k,
             "at_k": self.at_k,
             "always_rerank_positives": self.always_rerank_positives,
-            "bm25_subset_name": self.bm25_subset_name,
+            "candidate_subset_name": self.candidate_subset_name,
+            "bm25_subset_name": self.candidate_subset_name,
             "retrieved_corpus_ids_column": self.retrieved_corpus_ids_column,
         }
