@@ -242,13 +242,13 @@ class SparseNanoBEIREvaluator(NanoBEIREvaluator):
         if self.max_active_dims is not None:
             self.name += f"_{self.max_active_dims}"
 
-    def _get_human_readable_name(self, dataset_name: DatasetNameType) -> str:
+    def _get_human_readable_name(self, dataset_name: DatasetNameType | str) -> str:
         human_readable_name = super()._get_human_readable_name(dataset_name)
         if self.max_active_dims is not None:
             human_readable_name += f"_{self.max_active_dims}"
         return human_readable_name
 
-    def _append_csv_headers(self, score_function_names):
+    def _append_csv_headers(self, score_function_names: list[str]) -> None:
         super()._append_csv_headers(score_function_names)
         # To avoid adding the sparse-specific headers multiple times, we only add them if the superclass will
         # add metric columns for the specified score functions
@@ -264,7 +264,13 @@ class SparseNanoBEIREvaluator(NanoBEIREvaluator):
             )
 
     def __call__(
-        self, model: SparseEncoder, output_path: str | None = None, epoch: int = -1, steps: int = -1, *args, **kwargs
+        self,
+        model: SparseEncoder,
+        output_path: str | None = None,
+        epoch: int = -1,
+        steps: int = -1,
+        *args: Any,
+        **kwargs: Any,
     ) -> dict[str, float]:
         self.sparsity_stats = defaultdict(list)
         self.lengths = defaultdict(list)
