@@ -107,13 +107,15 @@ class NanoEvaluator(SentenceEvaluator):
         if self.truncate_dim:
             self.name += f"_{self.truncate_dim}"
 
-        self.mrr_at_k = mrr_at_k
-        self.ndcg_at_k = ndcg_at_k
-        self.accuracy_at_k = accuracy_at_k
-        self.precision_recall_at_k = precision_recall_at_k
-        self.map_at_k = map_at_k
+        # Copy list-like inputs so instances don't share mutable defaults.
+        self.mrr_at_k = list(mrr_at_k)
+        self.ndcg_at_k = list(ndcg_at_k)
+        self.accuracy_at_k = list(accuracy_at_k)
+        self.precision_recall_at_k = list(precision_recall_at_k)
+        self.map_at_k = list(map_at_k)
 
         self._validate_dataset_names()
+        self._normalize_prompts()
         self._validate_prompts()
         self._validate_mapping_splits()
 
@@ -198,12 +200,11 @@ class NanoEvaluator(SentenceEvaluator):
         if output_path is not None and self.write_csv:
             os.makedirs(output_path, exist_ok=True)
             csv_path = os.path.join(output_path, self.csv_file)
-            if not os.path.isfile(csv_path):
-                with open(csv_path, mode="w", encoding="utf-8") as file_out:
+            output_file_exists = os.path.isfile(csv_path)
+            with open(csv_path, mode="a" if output_file_exists else "w", encoding="utf-8") as file_out:
+                if not output_file_exists:
                     file_out.write(",".join(self.csv_headers))
                     file_out.write("\n")
-
-            with open(csv_path, mode="a", encoding="utf-8") as file_out:
                 output_data: list[float | int] = [epoch, steps]
                 for score_name in self.score_function_names:
                     for k_value in self.accuracy_at_k:
@@ -337,9 +338,9 @@ class NanoEvaluator(SentenceEvaluator):
                 qrels_dict[sample["query-id"]].add(corpus_ids)
 
         if self.query_prompts is not None:
-            ir_evaluator_kwargs["query_prompt"] = self.query_prompts.get(dataset_name, None)
+            ir_evaluator_kwargs["query_prompt"] = self._get_prompt_for_dataset(self.query_prompts, dataset_name)
         if self.corpus_prompts is not None:
-            ir_evaluator_kwargs["corpus_prompt"] = self.corpus_prompts.get(dataset_name, None)
+            ir_evaluator_kwargs["corpus_prompt"] = self._get_prompt_for_dataset(self.corpus_prompts, dataset_name)
 
         human_readable_name = self._get_human_readable_name(dataset_name)
         return self.information_retrieval_class(
@@ -434,27 +435,37 @@ class NanoEvaluator(SentenceEvaluator):
                 f"Available dataset names are: {list(self.dataset_name_to_human_readable.keys())}"
             )
 
+    def _normalize_prompts(self) -> None:
+        if isinstance(self.query_prompts, str):
+            self.query_prompts = {dataset_name: self.query_prompts for dataset_name in self.dataset_names}
+        if isinstance(self.corpus_prompts, str):
+            self.corpus_prompts = {dataset_name: self.corpus_prompts for dataset_name in self.dataset_names}
+
+    def _get_prompt_for_dataset(self, prompt_mapping: dict[str, str], dataset_name: str) -> str | None:
+        if dataset_name in prompt_mapping:
+            return prompt_mapping[dataset_name]
+        lower_to_prompt = {key.lower(): value for key, value in prompt_mapping.items()}
+        return lower_to_prompt.get(dataset_name.lower())
+
     def _validate_prompts(self) -> None:
         error_msg = ""
         if self.query_prompts is not None:
-            if isinstance(self.query_prompts, str):
-                self.query_prompts = {dataset_name: self.query_prompts for dataset_name in self.dataset_names}
-            else:
-                missing_query_prompts = [
-                    dataset_name for dataset_name in self.dataset_names if dataset_name not in self.query_prompts
-                ]
-                if missing_query_prompts:
-                    error_msg += f"The following datasets are missing query prompts: {missing_query_prompts}\n"
+            missing_query_prompts = [
+                dataset_name
+                for dataset_name in self.dataset_names
+                if self._get_prompt_for_dataset(self.query_prompts, dataset_name) is None
+            ]
+            if missing_query_prompts:
+                error_msg += f"The following datasets are missing query prompts: {missing_query_prompts}\n"
 
         if self.corpus_prompts is not None:
-            if isinstance(self.corpus_prompts, str):
-                self.corpus_prompts = {dataset_name: self.corpus_prompts for dataset_name in self.dataset_names}
-            else:
-                missing_corpus_prompts = [
-                    dataset_name for dataset_name in self.dataset_names if dataset_name not in self.corpus_prompts
-                ]
-                if missing_corpus_prompts:
-                    error_msg += f"The following datasets are missing corpus prompts: {missing_corpus_prompts}\n"
+            missing_corpus_prompts = [
+                dataset_name
+                for dataset_name in self.dataset_names
+                if self._get_prompt_for_dataset(self.corpus_prompts, dataset_name) is None
+            ]
+            if missing_corpus_prompts:
+                error_msg += f"The following datasets are missing corpus prompts: {missing_corpus_prompts}\n"
 
         if error_msg:
             raise ValueError(error_msg.strip())

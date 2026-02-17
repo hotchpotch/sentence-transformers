@@ -70,6 +70,7 @@ class CrossEncoderNanoEvaluator(SentenceEvaluator):
         self.corpus_subset_name = corpus_subset_name
         self.queries_subset_name = queries_subset_name
         self.qrels_subset_name = qrels_subset_name
+        self._bm25_subset_name_alias_input = bm25_subset_name
         if bm25_subset_name is not None:
             if candidate_subset_name != "bm25" and bm25_subset_name != candidate_subset_name:
                 raise ValueError(
@@ -267,6 +268,14 @@ class CrossEncoderNanoEvaluator(SentenceEvaluator):
                 qrels_mapping[sample["query-id"]].update(corpus_ids)
             else:
                 qrels_mapping[sample["query-id"]].add(corpus_ids)
+        self._validate_retrieval_references(
+            dataset_name=dataset_name,
+            split_name=split_name,
+            query_mapping=query_mapping,
+            corpus_mapping=corpus_mapping,
+            qrels_mapping=qrels_mapping,
+            retrieved=retrieved,
+        )
 
         def mapper(
             sample: dict[str, Any],
@@ -305,6 +314,69 @@ class CrossEncoderNanoEvaluator(SentenceEvaluator):
             name=human_readable_name,
             **reranking_kwargs,
         )
+
+    def _validate_retrieval_references(
+        self,
+        dataset_name: str,
+        split_name: str,
+        query_mapping: dict[str, str],
+        corpus_mapping: dict[str, str],
+        qrels_mapping: dict[str, set[str]],
+        retrieved: Any,
+    ) -> None:
+        missing_query_ids_in_qrels = [query_id for query_id in qrels_mapping if query_id not in query_mapping]
+        missing_positive_ids = sorted(
+            {
+                corpus_id
+                for corpus_ids in qrels_mapping.values()
+                for corpus_id in corpus_ids
+                if corpus_id not in corpus_mapping
+            }
+        )
+
+        missing_query_ids_in_candidates: set[str] = set()
+        missing_qrels_for_candidates: set[str] = set()
+        missing_retrieved_ids: set[str] = set()
+        for sample in retrieved:
+            query_id = sample["query-id"]
+            if query_id not in query_mapping:
+                missing_query_ids_in_candidates.add(query_id)
+            if query_id not in qrels_mapping:
+                missing_qrels_for_candidates.add(query_id)
+            for document_id in sample[self.retrieved_corpus_ids_column]:
+                if document_id not in corpus_mapping:
+                    missing_retrieved_ids.add(document_id)
+
+        if any(
+            [
+                missing_query_ids_in_qrels,
+                missing_positive_ids,
+                missing_query_ids_in_candidates,
+                missing_qrels_for_candidates,
+                missing_retrieved_ids,
+            ]
+        ):
+            error_details: list[str] = []
+            if missing_query_ids_in_qrels:
+                error_details.append(f"qrels references unknown query IDs: {sorted(missing_query_ids_in_qrels)[:5]}")
+            if missing_positive_ids:
+                error_details.append(f"qrels references unknown corpus IDs: {missing_positive_ids[:5]}")
+            if missing_query_ids_in_candidates:
+                error_details.append(
+                    f"candidate subset references unknown query IDs: {sorted(missing_query_ids_in_candidates)[:5]}"
+                )
+            if missing_qrels_for_candidates:
+                error_details.append(
+                    f"candidate subset contains queries missing in qrels: {sorted(missing_qrels_for_candidates)[:5]}"
+                )
+            if missing_retrieved_ids:
+                error_details.append(
+                    f"candidate subset references unknown corpus IDs: {sorted(missing_retrieved_ids)[:5]}"
+                )
+            raise ValueError(
+                f"Inconsistent IDs found for dataset '{dataset_name}' split '{split_name}' in '{self.dataset_id}'. "
+                + " | ".join(error_details)
+            )
 
     def _load_dataset_subset_split(self, subset: str, split: str, required_columns: list[str]) -> Any:
         if not is_datasets_available():
@@ -405,10 +477,12 @@ class CrossEncoderNanoEvaluator(SentenceEvaluator):
             "queries_subset_name": self.queries_subset_name,
             "qrels_subset_name": self.qrels_subset_name,
             "candidate_subset_name": self.candidate_subset_name,
-            # Backward compatibility with historical serialized config keys.
-            "bm25_subset_name": self.candidate_subset_name,
             "retrieved_corpus_ids_column": self.retrieved_corpus_ids_column,
         }
+        if self._bm25_subset_name_alias_input is not None:
+            # Backward compatibility with historical serialized config keys.
+            config_dict["bm25_subset_name"] = self.candidate_subset_name
+        return config_dict
 
     def store_metrics_in_model_card_data(
         self,

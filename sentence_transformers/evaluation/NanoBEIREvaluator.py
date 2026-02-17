@@ -43,7 +43,12 @@ DATASET_NAME_TO_HUMAN_READABLE: dict[str, str] = {
 
 
 class NanoBEIREvaluator(NanoEvaluator):
-    """Evaluate a SentenceTransformer model on NanoBEIR datasets."""
+    """Evaluate a SentenceTransformer model on NanoBEIR datasets.
+
+    This class preserves the historical NanoBEIR short-name API
+    (for example ``msmarco``, ``nq``) while delegating the dataset loading
+    and aggregation mechanics to :class:`~sentence_transformers.evaluation.NanoEvaluator`.
+    """
 
     def __init__(
         self,

@@ -41,7 +41,12 @@ DATASET_NAME_TO_HUMAN_READABLE: dict[str, str] = {
 
 
 class CrossEncoderNanoBEIREvaluator(CrossEncoderNanoEvaluator):
-    """Evaluate a CrossEncoder model on NanoBEIR datasets."""
+    """Evaluate a CrossEncoder model on NanoBEIR datasets.
+
+    This class preserves the NanoBEIR short-name API while delegating the
+    shared reranking dataset mechanics to
+    :class:`~sentence_transformers.cross_encoder.evaluation.CrossEncoderNanoEvaluator`.
+    """
 
     def __init__(
         self,
@@ -102,13 +107,15 @@ class CrossEncoderNanoBEIREvaluator(CrossEncoderNanoEvaluator):
             )
 
     def get_config_dict(self) -> dict[str, Any]:
-        return {
+        config_dict: dict[str, Any] = {
             "dataset_names": self.dataset_names,
             "dataset_id": self.dataset_id,
             "rerank_k": self.rerank_k,
             "at_k": self.at_k,
             "always_rerank_positives": self.always_rerank_positives,
             "candidate_subset_name": self.candidate_subset_name,
-            "bm25_subset_name": self.candidate_subset_name,
             "retrieved_corpus_ids_column": self.retrieved_corpus_ids_column,
         }
+        if self._bm25_subset_name_alias_input is not None:
+            config_dict["bm25_subset_name"] = self.candidate_subset_name
+        return config_dict

@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 from typing import Any
 
 import numpy as np
 
 from sentence_transformers import SentenceTransformer
 from sentence_transformers.evaluation import NanoBEIREvaluator, NanoEvaluator, SequentialEvaluator
+
+logger = logging.getLogger(__name__)
 
 
 def parse_args() -> argparse.Namespace:
@@ -77,6 +80,8 @@ def main() -> None:
 
     metrics = sequential(model)
     ndcg_metrics = {key: value for key, value in metrics.items() if "ndcg@10" in key}
+    if not ndcg_metrics:
+        logger.warning("No ndcg@10 metrics were found in the evaluation output.")
 
     print(
         json.dumps(
