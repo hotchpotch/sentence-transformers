@@ -42,12 +42,22 @@ COLLECTION_DATASET_IDS: dict[str, list[str]] = {
         "sionic-ai/NanoBEIR-vi",
         "sionic-ai/NanoBEIR-th",
     ],
+    "nanomiracl": [
+        "hotchpotch/NanoMIRACL",
+    ],
+    "nanocodesearchnet": [
+        "hotchpotch/NanoCodeSearchNet",
+    ],
 }
 
 COLLECTION_ALIASES: dict[str, str] = {
     "nanobeir": "nanobeir",
     "mnanobeir": "mnanobeir",
     "multilingualnanobeir": "mnanobeir",
+    "nanomiracl": "nanomiracl",
+    "nano-miracl": "nanomiracl",
+    "nanocodesearchnet": "nanocodesearchnet",
+    "nano-codesearchnet": "nanocodesearchnet",
 }
 
 NANOBEIR_DATASET_ID_TO_HUMAN_READABLE_PREFIX: dict[str, str] = {
@@ -65,6 +75,15 @@ NANOBEIR_DATASET_ID_TO_HUMAN_READABLE_PREFIX: dict[str, str] = {
     "LiquidAI/NanoBEIR-ja": "MNanoBEIR_ja",
     "sionic-ai/NanoBEIR-vi": "MNanoBEIR_vi",
     "sionic-ai/NanoBEIR-th": "MNanoBEIR_th",
+    "hotchpotch/NanoMIRACL": "NanoMIRACL",
+    "hotchpotch/NanoCodeSearchNet": "NanoCodeSearchNet",
+}
+
+COLLECTION_TO_EVALUATOR_KIND: dict[str, str] = {
+    "nanobeir": "nanobeir",
+    "mnanobeir": "nanobeir",
+    "nanomiracl": "nano",
+    "nanocodesearchnet": "nano",
 }
 
 
@@ -129,7 +148,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Named NanoBEIR collection(s), repeatable or comma-separated. "
-            "Supported: NanoBEIR, MNanoBEIR, MultilingualNanoBEIR"
+            "Supported: NanoBEIR, MNanoBEIR, MultilingualNanoBEIR, NanoMIRACL, NanoCodeSearchNet"
         ),
     )
     parser.add_argument(
@@ -152,7 +171,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--nanobeir-datasets",
-        default="msmarco,nq",
+        default=None,
         help="Deprecated alias for split targets when --split-target is not set.",
     )
 
@@ -204,7 +223,10 @@ def resolve_collections(collection_values: Iterable[str] | None) -> list[str]:
     for raw in raw_values:
         normalized = COLLECTION_ALIASES.get(raw.lower())
         if normalized is None:
-            raise ValueError(f"Unknown collection '{raw}'. Supported: NanoBEIR, MNanoBEIR, MultilingualNanoBEIR")
+            raise ValueError(
+                "Unknown collection "
+                f"'{raw}'. Supported: NanoBEIR, MNanoBEIR, MultilingualNanoBEIR, NanoMIRACL, NanoCodeSearchNet"
+            )
         resolved.append(normalized)
 
     deduped: list[str] = []
@@ -217,36 +239,48 @@ def resolve_collections(collection_values: Iterable[str] | None) -> list[str]:
     return deduped
 
 
-def resolve_split_targets(args: argparse.Namespace) -> list[str] | None:
+def resolve_collection_dataset_entries(args: argparse.Namespace) -> list[tuple[str, str]]:
+    collection_names = resolve_collections(args.collection)
+
+    entries: list[tuple[str, str]] = []
+    for collection_name in collection_names:
+        evaluator_kind = COLLECTION_TO_EVALUATOR_KIND[collection_name]
+        for dataset_id in COLLECTION_DATASET_IDS[collection_name]:
+            entries.append((evaluator_kind, dataset_id))
+
+    if args.nanobeir_dataset_id is not None:
+        for dataset_id in parse_csv(args.nanobeir_dataset_id):
+            entries.append(("nanobeir", dataset_id))
+
+    if not entries:
+        entries = [("nanobeir", "sentence-transformers/NanoBEIR-en")]
+
+    deduped: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for entry in entries:
+        if entry in seen:
+            continue
+        seen.add(entry)
+        deduped.append(entry)
+    return deduped
+
+
+def resolve_split_targets(args: argparse.Namespace, collection_entries: list[tuple[str, str]]) -> list[str] | None:
+    has_nanobeir = any(kind == "nanobeir" for kind, _ in collection_entries)
+    has_non_nanobeir = any(kind != "nanobeir" for kind, _ in collection_entries)
+
     split_targets = parse_repeated_csv(args.split_target)
     if split_targets:
         return split_targets
 
     fallback_targets = parse_csv(args.nanobeir_datasets)
-    return fallback_targets if fallback_targets else None
+    if fallback_targets:
+        return fallback_targets
 
-
-def resolve_nanobeir_dataset_ids(args: argparse.Namespace) -> list[str]:
-    collection_names = resolve_collections(args.collection)
-
-    dataset_ids: list[str] = []
-    for collection_name in collection_names:
-        dataset_ids.extend(COLLECTION_DATASET_IDS[collection_name])
-
-    if args.nanobeir_dataset_id is not None:
-        dataset_ids.extend(parse_csv(args.nanobeir_dataset_id))
-
-    if not dataset_ids:
-        dataset_ids = ["sentence-transformers/NanoBEIR-en"]
-
-    deduped: list[str] = []
-    seen: set[str] = set()
-    for dataset_id in dataset_ids:
-        if dataset_id in seen:
-            continue
-        seen.add(dataset_id)
-        deduped.append(dataset_id)
-    return deduped
+    # Keep historical default split-targets for NanoBEIR-only runs.
+    if has_nanobeir and not has_non_nanobeir:
+        return ["msmarco", "nq"]
+    return None
 
 
 def dataset_id_to_prefix(dataset_id: str) -> str:
@@ -256,22 +290,33 @@ def dataset_id_to_prefix(dataset_id: str) -> str:
 
 
 def build_evaluators(args: argparse.Namespace) -> list[Any]:
-    split_targets = resolve_split_targets(args)
-    nanobeir_dataset_ids = resolve_nanobeir_dataset_ids(args)
+    collection_entries = resolve_collection_dataset_entries(args)
+    split_targets = resolve_split_targets(args, collection_entries)
     extra_splits = parse_csv(args.extra_splits)
 
     evaluators: list[Any] = []
-    for dataset_id in nanobeir_dataset_ids:
-        nanobeir_evaluator = NanoBEIREvaluator(
-            dataset_names=split_targets,
-            dataset_id=dataset_id,
-            batch_size=args.batch_size,
-            show_progress_bar=args.show_progress,
-            write_csv=False,
-            query_prompts=args.query_prompt,
-            corpus_prompts=args.corpus_prompt,
-        )
-        evaluators.append(PrefixedEvaluator(nanobeir_evaluator, prefix=dataset_id_to_prefix(dataset_id)))
+    for evaluator_kind, dataset_id in collection_entries:
+        if evaluator_kind == "nanobeir":
+            evaluator = NanoBEIREvaluator(
+                dataset_names=split_targets,
+                dataset_id=dataset_id,
+                batch_size=args.batch_size,
+                show_progress_bar=args.show_progress,
+                write_csv=False,
+                query_prompts=args.query_prompt,
+                corpus_prompts=args.corpus_prompt,
+            )
+        else:
+            evaluator = NanoEvaluator(
+                dataset_names=split_targets or None,
+                dataset_id=dataset_id,
+                batch_size=args.batch_size,
+                show_progress_bar=args.show_progress,
+                write_csv=False,
+                query_prompts=args.query_prompt,
+                corpus_prompts=args.corpus_prompt,
+            )
+        evaluators.append(PrefixedEvaluator(evaluator, prefix=dataset_id_to_prefix(dataset_id)))
 
     if args.extra_dataset_id is not None:
         extra_evaluator = NanoEvaluator(
@@ -370,9 +415,10 @@ def _print_effective_prompts(model: SentenceTransformer, args: argparse.Namespac
 
 
 def _print_eval_plan(args: argparse.Namespace) -> None:
-    split_targets = resolve_split_targets(args)
-    dataset_ids = resolve_nanobeir_dataset_ids(args)
-    print(f"NanoBEIR dataset ids: {dataset_ids}")
+    collection_entries = resolve_collection_dataset_entries(args)
+    split_targets = resolve_split_targets(args, collection_entries)
+    dataset_ids = [dataset_id for _, dataset_id in collection_entries]
+    print(f"collection dataset ids: {dataset_ids}")
     print(f"split targets: {split_targets if split_targets is not None else 'all'}")
     if args.extra_dataset_id is not None:
         extra_splits = parse_csv(args.extra_splits)
