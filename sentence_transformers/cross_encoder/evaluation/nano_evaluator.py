@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+from tqdm import tqdm
 
 from sentence_transformers.cross_encoder.evaluation.reranking import CrossEncoderRerankingEvaluator
 from sentence_transformers.evaluation.SentenceEvaluator import SentenceEvaluator
@@ -75,6 +76,7 @@ class CrossEncoderNanoEvaluator(SentenceEvaluator):
         if dataset_names is None:
             if not self.auto_expand_splits_when_dataset_names_none:
                 raise ValueError("dataset_names cannot be None when auto split expansion is disabled.")
+            # Queries splits define the evaluation tasks. We expand from this subset by default.
             dataset_names = self._get_available_splits(self.queries_subset_name)
 
         self.dataset_names = dataset_names
@@ -88,7 +90,10 @@ class CrossEncoderNanoEvaluator(SentenceEvaluator):
             "batch_size": self.batch_size,
             "write_csv": self.write_csv,
         }
-        self.evaluators = [self._load_dataset(dataset_name, **reranking_kwargs) for dataset_name in self.dataset_names]
+        self.evaluators = [
+            self._load_dataset(dataset_name, **reranking_kwargs)
+            for dataset_name in tqdm(self.dataset_names, desc="Loading Nano datasets", leave=False)
+        ]
 
         base_name = name if name is not None else self.dataset_repo_name
         self.name = f"{base_name}_R{self.rerank_k}_{self.aggregate_key}"
@@ -115,11 +120,12 @@ class CrossEncoderNanoEvaluator(SentenceEvaluator):
             out_txt = ""
         logger.info(f"Nano Evaluation of the model on {self.dataset_names} dataset{out_txt}:")
 
-        for evaluator in self.evaluators:
+        for evaluator in tqdm(self.evaluators, desc="Evaluating datasets", disable=not self.show_progress_bar):
             logger.info(f"Evaluating {evaluator.name}")
             evaluation = evaluator(model, output_path, epoch, steps)
             evaluator_prefix = f"{evaluator.name}_"
             for full_key, metric_value in evaluation.items():
+                # Parse metrics by the concrete sub-evaluator prefix to avoid underscore-splitting bugs.
                 metric = full_key[len(evaluator_prefix) :] if full_key.startswith(evaluator_prefix) else full_key
                 per_metric_results.setdefault(metric, []).append(metric_value)
                 per_dataset_results[full_key] = metric_value
@@ -261,6 +267,7 @@ class CrossEncoderNanoEvaluator(SentenceEvaluator):
             query_id: str = sample["query-id"]
             query = query_mapping[query_id]
             positives = [corpus_mapping[positive_id] for positive_id in qrels_mapping[query_id]]
+            # Keep first-stage retrieval order and trim to top-k candidates for reranking.
             retrieved_corpus_ids = sample[retrieved_corpus_ids_column]
             documents = [corpus_mapping[document_id] for document_id in retrieved_corpus_ids[:rerank_k]]
             return {

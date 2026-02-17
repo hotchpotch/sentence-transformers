@@ -87,6 +87,7 @@ class NanoEvaluator(SentenceEvaluator):
         if dataset_names is None:
             if not self.auto_expand_splits_when_dataset_names_none:
                 raise ValueError("dataset_names cannot be None when auto split expansion is disabled.")
+            # Queries splits define evaluation tasks, so we discover them from this subset.
             dataset_names = self._get_available_splits(self.queries_subset_name)
 
         self.dataset_names = dataset_names
@@ -187,6 +188,7 @@ class NanoEvaluator(SentenceEvaluator):
             evaluation = evaluator(model, output_path, epoch, steps)
             evaluator_prefix = f"{evaluator.name}_"
             for full_key, metric_value in evaluation.items():
+                # Parse metrics by concrete evaluator name to avoid underscore-splitting ambiguities.
                 metric = full_key[len(evaluator_prefix) :] if full_key.startswith(evaluator_prefix) else full_key
                 per_metric_results.setdefault(metric, []).append(metric_value)
                 per_dataset_results[full_key] = metric_value
@@ -402,6 +404,7 @@ class NanoEvaluator(SentenceEvaluator):
         if self.dataset_name_to_human_readable is None:
             return
 
+        # Mapping mode should fail fast on typos/mismatches between mapping and dataset splits.
         for dataset_name in self.dataset_names:
             split_name = self._get_split_name(dataset_name)
             self._validate_split_exists(dataset_name, self.corpus_subset_name, split_name)
