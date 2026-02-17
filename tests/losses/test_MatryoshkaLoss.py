@@ -56,11 +56,14 @@ def test_dimension_exceeds_model_dimension_raises_error(static_retrieval_mrl_en_
         )
 
 
-def test_model_dimension_not_in_dims_warns(static_retrieval_mrl_en_v1_model, mock_loss, caplog):
+def test_model_dimension_not_in_dims_warns(mock_loss, caplog):
     """Test that model dimension not in matryoshka_dims produces warning."""
+    model = Mock(spec=SentenceTransformer)
+    model.get_sentence_embedding_dimension.return_value = 1024
+
     with caplog.at_level("WARNING"):
         MatryoshkaLoss(
-            model=static_retrieval_mrl_en_v1_model,
+            model=model,
             loss=mock_loss,
             matryoshka_dims=[512, 256, 128],  # 1024 not included
         )
@@ -68,13 +71,103 @@ def test_model_dimension_not_in_dims_warns(static_retrieval_mrl_en_v1_model, moc
     # Check that warning was logged
     assert len(caplog.records) == 1
     assert caplog.records[0].levelname == "WARNING"
-    expected_msg = (
-        "The model's embedding dimension 1024 is not included in matryoshka_dims: [512, 256, 128]. "
-        "This means that the full model dimension won't be trained, which may lead to degraded performance "
-        "when using the model without specifying a lower truncation dimension. It is strongly recommended to include "
-        "1024 in matryoshka_dims."
+    msg = caplog.records[0].message
+    assert "The model's embedding dimension 1024 is not included in matryoshka_dims" in msg
+    assert "full model dimension won't be trained" in msg
+    assert "recommended to include 1024 in matryoshka_dims" in msg
+
+
+def test_matryoshka_dims_not_consistent_halving_warns(mock_loss, caplog):
+    """Test warning when matryoshka_dims do not follow a consistent halving progression."""
+    model = Mock(spec=SentenceTransformer)
+    model.get_sentence_embedding_dimension.return_value = 1024
+
+    with caplog.at_level("WARNING"):
+        MatryoshkaLoss(
+            model=model,
+            loss=mock_loss,
+            matryoshka_dims=[1024, 768, 512, 256],
+        )
+
+    assert len(caplog.records) == 1
+    assert caplog.records[0].levelname == "WARNING"
+    msg = caplog.records[0].message
+    assert "matryoshka_dims do not follow the recommended consistent halving schedule after sorting" in msg
+    assert "This configuration is allowed" in msg
+    assert "https://arxiv.org/html/2205.13147v4#S3" in msg
+    assert "[1024, 768, 512, 256]" in msg
+
+
+def test_matryoshka_dims_halving_to_3_no_warning_with_384_base_dim(mock_loss, caplog):
+    """Test no warning for a constant halving progression down to 3 dims."""
+    model = Mock(spec=SentenceTransformer)
+    model.get_sentence_embedding_dimension.return_value = 384
+
+    with caplog.at_level("WARNING"):
+        MatryoshkaLoss(
+            model=model,
+            loss=mock_loss,
+            matryoshka_dims=[384, 192, 96, 48, 24, 12, 6, 3],
+        )
+
+    assert len(caplog.records) == 0
+
+
+def test_both_warnings_emitted_when_both_conditions_met(mock_loss, caplog):
+    """Test both warnings are emitted when both conditions are met."""
+    model = Mock(spec=SentenceTransformer)
+    model.get_sentence_embedding_dimension.return_value = 768
+
+    with caplog.at_level("WARNING"):
+        MatryoshkaLoss(
+            model=model,
+            loss=mock_loss,
+            matryoshka_dims=[512, 256, 192],  # 768 not included and not consistent-halving
+        )
+
+    assert len(caplog.records) == 2
+    messages = [record.message for record in caplog.records]
+    assert any("embedding dimension 768 is not included in matryoshka_dims" in msg for msg in messages)
+    assert any(
+        "matryoshka_dims do not follow the recommended consistent halving schedule after sorting" in msg
+        for msg in messages
     )
-    assert caplog.records[0].message == expected_msg
+
+
+def test_consistent_halving_warning_only_when_model_dim_is_included(mock_loss, caplog):
+    """Test only the consistent-halving warning is emitted when model dimension is included."""
+    model = Mock(spec=SentenceTransformer)
+    model.get_sentence_embedding_dimension.return_value = 768
+
+    with caplog.at_level("WARNING"):
+        MatryoshkaLoss(
+            model=model,
+            loss=mock_loss,
+            matryoshka_dims=[768, 512, 256, 128],  # model dim included, but not consistent-halving
+        )
+
+    assert len(caplog.records) == 1
+    msg = caplog.records[0].message
+    assert "matryoshka_dims do not follow the recommended consistent halving schedule after sorting" in msg
+    assert "embedding dimension 768 is not included in matryoshka_dims" not in msg
+
+
+def test_consistent_halving_warning_with_two_dims(mock_loss, caplog):
+    """Test warning is emitted for non-halving two-dimension settings."""
+    model = Mock(spec=SentenceTransformer)
+    model.get_sentence_embedding_dimension.return_value = 768
+
+    with caplog.at_level("WARNING"):
+        MatryoshkaLoss(
+            model=model,
+            loss=mock_loss,
+            matryoshka_dims=[768, 512],  # not a strict halving pair
+        )
+
+    assert len(caplog.records) == 1
+    msg = caplog.records[0].message
+    assert "matryoshka_dims do not follow the recommended consistent halving schedule after sorting" in msg
+    assert "embedding dimension 768 is not included in matryoshka_dims" not in msg
 
 
 def test_model_dimension_none_no_validation(mock_loss):

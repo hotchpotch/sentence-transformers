@@ -211,6 +211,18 @@ class MatryoshkaLoss(nn.Module):
                     "when using the model without specifying a lower truncation dimension. It is strongly recommended to include "
                     f"{model_embedding_dim} in matryoshka_dims."
                 )
+        sorted_dims = sorted(matryoshka_dims, reverse=True)
+        if len(sorted_dims) >= 2:
+            # Warn when dims do not follow a strict halving schedule, e.g. d, d/2, d/4, ...
+            # This matches the "consistent halving" guidance from the Matryoshka paper (2205.13147).
+            non_halving = any(sorted_dims[i] != 2 * sorted_dims[i + 1] for i in range(len(sorted_dims) - 1))
+            if non_halving:
+                logger.warning(
+                    "matryoshka_dims do not follow the recommended consistent halving schedule after sorting: %s. "
+                    "This configuration is allowed, but a typical schedule is [d, d/2, d/4, ...]. "
+                    "Refer to the MRL paper, Section 3: https://arxiv.org/html/2205.13147v4#S3",
+                    sorted_dims,
+                )
 
         # Sort the dimensions and weights in descending order
         dims_weights = zip(matryoshka_dims, matryoshka_weights)
