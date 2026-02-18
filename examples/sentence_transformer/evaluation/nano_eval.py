@@ -98,6 +98,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--device", default=None, help="Optional device override (e.g. 'cuda', 'cpu').")
     parser.add_argument("--trust-remote-code", action="store_true", help="Enable trust_remote_code for model loading.")
+    parser.add_argument(
+        "--model-max-seq-length",
+        type=int,
+        default=None,
+        help="Optional max_seq_length override. If omitted, keep the model default.",
+    )
 
     parser.add_argument(
         "-c",
@@ -342,12 +348,15 @@ def load_model(args: argparse.Namespace) -> SentenceTransformer:
     if attn_implementation is not None:
         model_kwargs["attn_implementation"] = attn_implementation
 
-    return SentenceTransformer(
+    model = SentenceTransformer(
         args.model,
         device=args.device,
         trust_remote_code=args.trust_remote_code,
         model_kwargs=model_kwargs,
     )
+    if args.model_max_seq_length is not None:
+        model.max_seq_length = args.model_max_seq_length
+    return model
 
 
 def _resolve_effective_query_prompt(
