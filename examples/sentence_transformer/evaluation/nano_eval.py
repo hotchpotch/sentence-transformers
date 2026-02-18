@@ -24,7 +24,9 @@ from typing import Any
 import numpy as np
 import torch
 
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import CrossEncoder, SentenceTransformer
+from sentence_transformers.cross_encoder.evaluation import CrossEncoderNanoBEIREvaluator, CrossEncoderNanoEvaluator
+from sentence_transformers.cross_encoder.evaluation.reranking import CrossEncoderRerankingEvaluator
 from sentence_transformers.evaluation import NanoBEIREvaluator, NanoEvaluator
 from sentence_transformers.evaluation.InformationRetrievalEvaluator import InformationRetrievalEvaluator
 from sentence_transformers.evaluation.NanoBEIREvaluator import DATASET_NAME_TO_HUMAN_READABLE
@@ -32,6 +34,14 @@ from sentence_transformers.model_card import get_versions
 from sentence_transformers.util import is_datasets_available
 
 logger = logging.getLogger(__name__)
+
+TIMING_KEYS = [
+    "query_embedding_seconds",
+    "corpus_embedding_seconds",
+    "score_and_topk_seconds",
+    "metric_compute_seconds",
+    "pure_compute_seconds",
+]
 
 COLLECTION_DATASET_IDS: dict[str, list[str]] = {
     "nanobeir": [
@@ -78,6 +88,12 @@ class EvalTask:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Evaluate a SentenceTransformer on Nano datasets with split-level JSON cache"
+    )
+    parser.add_argument(
+        "--model-type",
+        default="embedding",
+        choices=["embedding", "cross-encoder"],
+        help="Evaluation mode: embedding retrieval or cross-encoder reranking.",
     )
     parser.add_argument("--model", required=True, help="Model name or local path")
     parser.add_argument(
@@ -161,13 +177,21 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument(
+        "--candidate-subset-name",
+        default="bm25",
+        help=(
+            "Candidate retrieval subset/config name used by cross-encoder Nano evaluators "
+            "(e.g., bm25, dense). Default: bm25."
+        ),
+    )
     parser.add_argument("--show-progress", action="store_true")
     parser.add_argument("--query-prompt", default=None)
     parser.add_argument("--corpus-prompt", default=None)
     parser.add_argument(
         "--output-dir",
         default="output/nano_eval",
-        help="Base output directory. Results are saved to {output-dir}/{model_name}/.",
+        help="Base output directory. Results are saved to {output-dir}/{model-type}-{model_name}/.",
     )
     parser.add_argument("--override", action="store_true", help="Re-run evaluations even if split JSON cache exists.")
     parser.add_argument(
@@ -255,9 +279,6 @@ def resolve_collection_dataset_entries(args: argparse.Namespace) -> list[tuple[s
 
 
 def resolve_nanobeir_split_targets(args: argparse.Namespace, entries: list[tuple[str, str]]) -> list[str] | None:
-    has_nanobeir = any(kind == "nanobeir" for kind, _ in entries)
-    has_non_nanobeir = any(kind != "nanobeir" for kind, _ in entries)
-
     split_targets = parse_repeated_csv(args.split_target)
     if split_targets:
         return split_targets
@@ -266,9 +287,7 @@ def resolve_nanobeir_split_targets(args: argparse.Namespace, entries: list[tuple
     if fallback_targets:
         return fallback_targets
 
-    # Keep historical default for NanoBEIR-only runs.
-    if has_nanobeir and not has_non_nanobeir:
-        return ["msmarco", "nq"]
+    # Default behavior: evaluate all NanoBEIR splits when split targets are omitted.
     return None
 
 
@@ -341,22 +360,34 @@ def _resolve_attn_implementation(args: argparse.Namespace) -> str | None:
     return attn_implementation
 
 
-def load_model(args: argparse.Namespace) -> SentenceTransformer:
+def load_model(args: argparse.Namespace) -> SentenceTransformer | CrossEncoder:
     attn_implementation = _resolve_attn_implementation(args)
 
-    model_kwargs: dict[str, Any] = {"dtype": _resolve_dtype(args.dtype)}
+    if args.model_type == "embedding":
+        model_kwargs: dict[str, Any] = {"dtype": _resolve_dtype(args.dtype)}
+        if attn_implementation is not None:
+            model_kwargs["attn_implementation"] = attn_implementation
+
+        model = SentenceTransformer(
+            args.model,
+            device=args.device,
+            trust_remote_code=args.trust_remote_code,
+            model_kwargs=model_kwargs,
+        )
+        if args.model_max_seq_length is not None:
+            model.max_seq_length = args.model_max_seq_length
+        return model
+
+    model_kwargs = {"dtype": _resolve_dtype(args.dtype)}
     if attn_implementation is not None:
         model_kwargs["attn_implementation"] = attn_implementation
-
-    model = SentenceTransformer(
+    return CrossEncoder(
         args.model,
         device=args.device,
+        max_length=args.model_max_seq_length,
         trust_remote_code=args.trust_remote_code,
         model_kwargs=model_kwargs,
     )
-    if args.model_max_seq_length is not None:
-        model.max_seq_length = args.model_max_seq_length
-    return model
 
 
 def _resolve_effective_query_prompt(
@@ -398,7 +429,22 @@ def _resolve_effective_corpus_prompt(
     return None, "none"
 
 
-def _resolve_effective_prompts(model: SentenceTransformer, args: argparse.Namespace) -> dict[str, str | None]:
+def _resolve_effective_prompts(
+    model: SentenceTransformer | CrossEncoder, args: argparse.Namespace
+) -> dict[str, str | None]:
+    if args.model_type == "cross-encoder":
+        query_source = "cli(--query-prompt)" if args.query_prompt is not None else "none"
+        corpus_source = "cli(--corpus-prompt)" if args.corpus_prompt is not None else "none"
+        return {
+            "query_prompt": args.query_prompt,
+            "query_prompt_source": query_source,
+            "corpus_prompt": args.corpus_prompt,
+            "corpus_prompt_source": corpus_source,
+        }
+
+    if not isinstance(model, SentenceTransformer):
+        raise TypeError("Expected SentenceTransformer model for embedding prompt resolution.")
+
     query_prompt, query_source = _resolve_effective_query_prompt(model, args.query_prompt)
     corpus_prompt, corpus_source = _resolve_effective_corpus_prompt(model, args.corpus_prompt)
 
@@ -431,17 +477,18 @@ def _sanitize_output_part(value: str) -> str:
     return "".join(char if char.isalnum() or char in {"-", "_", "."} else "_" for char in value)
 
 
-def _resolve_model_output_name(model_name_or_path: str) -> str:
+def _resolve_model_output_name(model_name_or_path: str, model_type: str) -> str:
     normalized = model_name_or_path.strip().rstrip("/\\")
     if not normalized:
-        return "model"
+        return f"{_sanitize_output_part(model_type)}-model"
     model_name = normalized.replace("\\", "/").split("/")[-1]
     safe_name = _sanitize_output_part(model_name)
-    return safe_name or "model"
+    name_part = safe_name or "model"
+    return f"{_sanitize_output_part(model_type)}-{name_part}"
 
 
 def _resolve_model_output_dir(args: argparse.Namespace) -> Path:
-    output_dir = Path(args.output_dir) / _resolve_model_output_name(args.model)
+    output_dir = Path(args.output_dir) / _resolve_model_output_name(args.model, args.model_type)
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
 
@@ -496,7 +543,32 @@ def _collect_runtime_environment() -> dict[str, Any]:
     }
 
 
-def _create_ir_evaluator(task: EvalTask, args: argparse.Namespace) -> InformationRetrievalEvaluator:
+def _create_evaluator(
+    task: EvalTask, args: argparse.Namespace
+) -> InformationRetrievalEvaluator | CrossEncoderRerankingEvaluator:
+    if args.model_type == "cross-encoder":
+        common_kwargs: dict[str, Any] = {
+            "batch_size": args.batch_size,
+            "show_progress_bar": args.show_progress,
+            "write_csv": False,
+            "candidate_subset_name": args.candidate_subset_name,
+        }
+        if task.evaluator_kind == "nanobeir":
+            wrapper = CrossEncoderNanoBEIREvaluator(
+                dataset_names=[task.split_name],
+                dataset_id=task.dataset_id,
+                **common_kwargs,
+            )
+        else:
+            wrapper = CrossEncoderNanoEvaluator(
+                dataset_names=[task.split_name],
+                dataset_id=task.dataset_id,
+                **common_kwargs,
+            )
+        if len(wrapper.evaluators) != 1:
+            raise ValueError(f"Expected exactly one CE evaluator for task {task}, got {len(wrapper.evaluators)}")
+        return wrapper.evaluators[0]
+
     common_kwargs: dict[str, Any] = {
         "batch_size": args.batch_size,
         "show_progress_bar": args.show_progress,
@@ -519,8 +591,26 @@ def _create_ir_evaluator(task: EvalTask, args: argparse.Namespace) -> Informatio
         )
 
     if len(wrapper.evaluators) != 1:
-        raise ValueError(f"Expected exactly one IR evaluator for task {task}, got {len(wrapper.evaluators)}")
+        raise ValueError(f"Expected exactly one embedding evaluator for task {task}, got {len(wrapper.evaluators)}")
     return wrapper.evaluators[0]
+
+
+def _build_model_metadata(model: SentenceTransformer | CrossEncoder, args: argparse.Namespace) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "model_type": args.model_type,
+        "name_or_path": args.model,
+        "device": args.device,
+        "dtype": args.dtype,
+        "attn_implementation": _resolve_attn_implementation(args),
+        "trust_remote_code": args.trust_remote_code,
+    }
+    if args.model_type == "embedding":
+        metadata["max_seq_length"] = model.max_seq_length
+        metadata["similarity_fn_name"] = model.similarity_fn_name
+    else:
+        metadata["max_seq_length"] = model.max_length
+        metadata["similarity_fn_name"] = None
+    return metadata
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -530,7 +620,7 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 
 def _run_or_load_split(
     task: EvalTask,
-    model: SentenceTransformer,
+    model: SentenceTransformer | CrossEncoder,
     args: argparse.Namespace,
     prompt_info: dict[str, str | None],
     model_output_dir: Path,
@@ -548,31 +638,30 @@ def _run_or_load_split(
         }
 
     print(f"evaluating: {task.target_name}/{task.split_name}")
-    ir_evaluator = _create_ir_evaluator(task, args)
+    evaluator = _create_evaluator(task, args)
 
     eval_started_at_utc = datetime.now(timezone.utc)
     eval_start = time.perf_counter()
-    metrics = _normalize_metrics(ir_evaluator(model, output_path=None))
+    metrics = _normalize_metrics(evaluator(model, output_path=None))
     eval_elapsed_seconds = time.perf_counter() - eval_start
     eval_finished_at_utc = datetime.now(timezone.utc)
 
-    timing = {key: float(value) for key, value in ir_evaluator.last_timing.items()}
-    if "pure_compute_seconds" not in timing:
-        timing["pure_compute_seconds"] = float(eval_elapsed_seconds)
+    timing: dict[str, float] = {key: 0.0 for key in TIMING_KEYS}
+    timing["pure_compute_seconds"] = float(eval_elapsed_seconds)
+    if hasattr(evaluator, "last_timing"):
+        last_timing = getattr(evaluator, "last_timing")
+        if isinstance(last_timing, dict):
+            for key, value in last_timing.items():
+                if key in TIMING_KEYS and isinstance(value, (int, float)):
+                    timing[key] = float(value)
+            if "pure_compute_seconds" not in last_timing:
+                timing["pure_compute_seconds"] = float(eval_elapsed_seconds)
 
     aggregate_metric_value = _compute_aggregate_metric_value(metrics, args.aggregate_metric)
 
     payload: dict[str, Any] = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-        "model": {
-            "name_or_path": args.model,
-            "device": args.device,
-            "dtype": args.dtype,
-            "attn_implementation": _resolve_attn_implementation(args),
-            "trust_remote_code": args.trust_remote_code,
-            "max_seq_length": model.max_seq_length,
-            "similarity_fn_name": model.similarity_fn_name,
-        },
+        "model": _build_model_metadata(model, args),
         "environment": environment,
         "prompts": prompt_info,
         "target": {
@@ -585,6 +674,7 @@ def _run_or_load_split(
             "batch_size": args.batch_size,
             "aggregate_metric": args.aggregate_metric,
             "show_progress": args.show_progress,
+            "candidate_subset_name": args.candidate_subset_name if args.model_type == "cross-encoder" else None,
         },
         "evaluation": {
             "started_at_utc": eval_started_at_utc.isoformat(),
@@ -607,7 +697,7 @@ def _run_or_load_split(
 
 
 def _build_all_payload(
-    model: SentenceTransformer,
+    model: SentenceTransformer | CrossEncoder,
     args: argparse.Namespace,
     prompt_info: dict[str, str | None],
     environment: dict[str, Any],
@@ -616,14 +706,7 @@ def _build_all_payload(
     split_entries: list[dict[str, Any]] = []
     aggregate_metric_values: list[float] = []
 
-    timing_keys = [
-        "query_embedding_seconds",
-        "corpus_embedding_seconds",
-        "score_and_topk_seconds",
-        "metric_compute_seconds",
-        "pure_compute_seconds",
-    ]
-    timing_totals: dict[str, float] = {key: 0.0 for key in timing_keys}
+    timing_totals: dict[str, float] = {key: 0.0 for key in TIMING_KEYS}
 
     for result in split_results:
         payload = result["payload"]
@@ -634,7 +717,7 @@ def _build_all_payload(
         if isinstance(aggregate_metric_value, (int, float)):
             aggregate_metric_values.append(float(aggregate_metric_value))
 
-        for key in timing_keys:
+        for key in TIMING_KEYS:
             value = timing.get(key)
             if isinstance(value, (int, float)):
                 timing_totals[key] += float(value)
@@ -673,15 +756,7 @@ def _build_all_payload(
 
     all_payload: dict[str, Any] = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-        "model": {
-            "name_or_path": args.model,
-            "device": args.device,
-            "dtype": args.dtype,
-            "attn_implementation": _resolve_attn_implementation(args),
-            "trust_remote_code": args.trust_remote_code,
-            "max_seq_length": model.max_seq_length,
-            "similarity_fn_name": model.similarity_fn_name,
-        },
+        "model": _build_model_metadata(model, args),
         "environment": environment,
         "cli_args": vars(args),
         "prompts": prompt_info,
