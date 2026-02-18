@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import sys
 import importlib
-from types import SimpleNamespace
+import sys
 from collections.abc import Iterator
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -27,7 +27,7 @@ class FakeDataset:
             return [row[key] for row in self.rows]
         return self.rows[key]
 
-    def map(self, fn: Any, fn_kwargs: dict[str, Any] | None = None) -> "FakeDataset":
+    def map(self, fn: Any, fn_kwargs: dict[str, Any] | None = None) -> FakeDataset:
         kwargs = fn_kwargs or {}
         return FakeDataset([fn(row, **kwargs) for row in self.rows])
 
@@ -229,3 +229,4 @@ def test_sequential_evaluator_with_nanobeir_and_nanocodesearchnet(
     assert "sequential_score" in metrics
     assert any(key.startswith("NanoBEIR_mean_") for key in metrics)
     assert any(key.startswith("NanoCodeSearchNet_mean_") for key in metrics)
+    assert "NanoBEIR_mean_cosine_ndcg@10" in metrics

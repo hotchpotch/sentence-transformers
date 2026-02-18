@@ -235,7 +235,7 @@ def parse_args() -> argparse.Namespace:
         action="append",
         default=None,
         help=(
-            "Optional generic NanoEvaluator dataset id(s), repeatable or comma-separated. "
+            "Optional dataset id(s) in Nano-style format, repeatable or comma-separated. "
             "Example: -d hotchpotch/NanoCodeSearchNet,hotchpotch/NanoMIRACL."
         ),
     )

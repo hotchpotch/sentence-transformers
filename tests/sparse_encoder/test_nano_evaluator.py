@@ -270,3 +270,4 @@ def test_sequential_evaluator_with_sparse_nanobeir_and_nanocodesearchnet(
     assert "sequential_score" in metrics
     assert any(key.startswith("NanoBEIR_mean_") for key in metrics)
     assert any(key.startswith("NanoCodeSearchNet_mean_") for key in metrics)
+    assert "NanoBEIR_mean_dot_ndcg@10" in metrics

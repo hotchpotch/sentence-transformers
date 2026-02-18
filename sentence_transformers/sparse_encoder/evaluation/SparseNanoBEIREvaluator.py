@@ -25,6 +25,45 @@ class SparseNanoBEIREvaluator(SparseNanoEvaluator):
         Use :class:`~sentence_transformers.sparse_encoder.evaluation.SparseNanoEvaluator`
         directly for non-NanoBEIR datasets with compatible
         ``corpus``/``queries``/``qrels`` subsets.
+
+    Reference:
+        NanoBEIR dataset card:
+        https://huggingface.co/datasets/sentence-transformers/NanoBEIR-en
+
+    Example:
+        ::
+
+            from sentence_transformers import SparseEncoder
+            from sentence_transformers.sparse_encoder.evaluation import SparseNanoBEIREvaluator
+
+            model = SparseEncoder("sparse-encoder/example-inference-splade-cocondenser-ensembledistil")
+            evaluator = SparseNanoBEIREvaluator(
+                dataset_names=["msmarco", "nq"],
+                batch_size=32,
+                show_progress_bar=True,
+            )
+            results = evaluator(model)
+            print(results["NanoBEIR_mean_dot_ndcg@10"])
+
+    Args:
+        dataset_names: NanoBEIR short names (e.g., ``msmarco``, ``nq``). If ``None``, all NanoBEIR subsets.
+        dataset_id: Hugging Face dataset ID with NanoBEIR-style subsets/splits.
+        mrr_at_k: ``k`` values for MRR.
+        ndcg_at_k: ``k`` values for nDCG.
+        accuracy_at_k: ``k`` values for accuracy.
+        precision_recall_at_k: ``k`` values for precision/recall.
+        map_at_k: ``k`` values for MAP.
+        show_progress_bar: Whether to show progress bars.
+        batch_size: Batch size for sparse retrieval evaluation.
+        write_csv: Whether to write CSV metrics to the output path.
+        max_active_dims: Optional maximum active dimensions for sparse vectors.
+        score_functions: Optional custom score functions.
+        main_score_function: Optional main score function name/value.
+        aggregate_fn: Aggregation function across subsets.
+        aggregate_key: Aggregate metric key prefix.
+        query_prompts: Optional per-subset or global query prompts.
+        corpus_prompts: Optional per-subset or global corpus prompts.
+        write_predictions: Whether to write per-query predictions.
     """
 
     def __init__(

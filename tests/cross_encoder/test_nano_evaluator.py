@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import sys
-from types import SimpleNamespace
 from collections.abc import Iterator
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -26,7 +26,7 @@ class FakeDataset:
             return [row[key] for row in self.rows]
         return self.rows[key]
 
-    def map(self, fn: Any, fn_kwargs: dict[str, Any] | None = None) -> "FakeDataset":
+    def map(self, fn: Any, fn_kwargs: dict[str, Any] | None = None) -> FakeDataset:
         kwargs = fn_kwargs or {}
         return FakeDataset([fn(row, **kwargs) for row in self.rows])
 
@@ -192,3 +192,16 @@ def test_cross_encoder_nano_evaluator_mapping_validates_split_exists(monkeypatch
 def test_cross_encoder_nanobeir_invalid_dataset_name() -> None:
     with pytest.raises(ValueError, match="are not valid NanoBEIR datasets"):
         CrossEncoderNanoBEIREvaluator(dataset_names=["invalidDataset"])
+
+
+def test_cross_encoder_nanobeir_primary_metric_key(
+    patch_cross_nano_eval: None,
+    dummy_cross_encoder: Any,
+) -> None:
+    evaluator = CrossEncoderNanoBEIREvaluator(
+        dataset_names=["msmarco"],
+        write_csv=False,
+    )
+
+    metrics = evaluator(dummy_cross_encoder)
+    assert "NanoBEIR_R100_mean_ndcg@10" in metrics
