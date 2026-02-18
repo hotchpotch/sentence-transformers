@@ -26,27 +26,27 @@ Offline execution tip:
 
 Quick examples:
 1) Embedding model on all NanoBEIR-en splits
-   ``uv run --with datasets python examples/sentence_transformer/evaluation/nano_eval.py \\
+   ``uv run --with datasets python examples/sentence_transformer/evaluation/evaluation_nano.py \\
    --model-type embedding --model intfloat/multilingual-e5-small -c NanoBEIR``
 
 2) Embedding model on multilingual NanoBEIR + extra datasets
-   ``uv run --with datasets python examples/sentence_transformer/evaluation/nano_eval.py \\
+   ``uv run --with datasets python examples/sentence_transformer/evaluation/evaluation_nano.py \\
    --model intfloat/multilingual-e5-large -c MNanoBEIR \\
    -d hotchpotch/NanoMIRACL -d hotchpotch/NanoCodeSearchNet \\
    --query-prompt "query: " --corpus-prompt "passage: "``
 
 3) Cross-encoder reranking on NanoBEIR-en with bm25 candidates
-   ``uv run --with datasets python examples/sentence_transformer/evaluation/nano_eval.py \\
+   ``uv run --with datasets python examples/sentence_transformer/evaluation/evaluation_nano.py \\
    --model-type cross-encoder --model cross-encoder/ms-marco-MiniLM-L6-v2 \\
    -c NanoBEIR --candidate-subset-name bm25``
 
 4) Cross-encoder reranking with custom candidate subset name
-   ``uv run --with datasets python examples/sentence_transformer/evaluation/nano_eval.py \\
+   ``uv run --with datasets python examples/sentence_transformer/evaluation/evaluation_nano.py \\
    --model-type cross-encoder --model your-org/your-reranker \\
    -d hotchpotch/NanoCodeSearchNet --candidate-subset-name dense``
 
 5) Sparse encoder evaluation on NanoBEIR
-   ``uv run --with datasets python examples/sentence_transformer/evaluation/nano_eval.py \\
+   ``uv run --with datasets python examples/sentence_transformer/evaluation/evaluation_nano.py \\
    --model-type sparse-encoder \\
    --model sparse-encoder/example-inference-free-splade-distilbert-base-uncased-nq \\
    -c NanoBEIR --query-prompt "query: " --corpus-prompt "passage: "``
@@ -123,22 +123,22 @@ COLLECTION_TO_EVALUATOR_KIND: dict[str, str] = {
 
 HELP_EPILOG = """Examples:
   # 1) Embedding evaluation on all NanoBEIR-en splits
-  uv run --with datasets python examples/sentence_transformer/evaluation/nano_eval.py \\
+  uv run --with datasets python examples/sentence_transformer/evaluation/evaluation_nano.py \\
     --model intfloat/multilingual-e5-small -c NanoBEIR
 
   # 2) Embedding evaluation on MNanoBEIR + custom datasets
-  uv run --with datasets python examples/sentence_transformer/evaluation/nano_eval.py \\
+  uv run --with datasets python examples/sentence_transformer/evaluation/evaluation_nano.py \\
     --model intfloat/multilingual-e5-large -c MNanoBEIR \\
     -d hotchpotch/NanoMIRACL -d hotchpotch/NanoCodeSearchNet \\
     --query-prompt "query: " --corpus-prompt "passage: "
 
   # 3) Cross-encoder reranking on NanoBEIR-en
-  uv run --with datasets python examples/sentence_transformer/evaluation/nano_eval.py \\
+  uv run --with datasets python examples/sentence_transformer/evaluation/evaluation_nano.py \\
     --model-type cross-encoder --model cross-encoder/ms-marco-MiniLM-L6-v2 \\
     -c NanoBEIR --candidate-subset-name bm25
 
   # 4) Sparse-encoder evaluation on NanoBEIR-en
-  uv run --with datasets python examples/sentence_transformer/evaluation/nano_eval.py \\
+  uv run --with datasets python examples/sentence_transformer/evaluation/evaluation_nano.py \\
     --model-type sparse-encoder \\
     --model sparse-encoder/example-inference-free-splade-distilbert-base-uncased-nq \\
     -c NanoBEIR --query-prompt "query: " --corpus-prompt "passage: "
