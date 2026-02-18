@@ -210,6 +210,12 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional sequence-length override. If omitted, keep model default.",
     )
+    parser.add_argument(
+        "--truncate-dim",
+        type=int,
+        default=None,
+        help="Optional embedding dimension to keep. If omitted, use full dimension.",
+    )
 
     parser.add_argument(
         "-c",
@@ -703,6 +709,7 @@ def _create_evaluator(
         "write_csv": False,
         "query_prompts": args.query_prompt,
         "corpus_prompts": args.corpus_prompt,
+        "truncate_dim": args.truncate_dim,
     }
 
     if task.evaluator_kind == "nanobeir":
