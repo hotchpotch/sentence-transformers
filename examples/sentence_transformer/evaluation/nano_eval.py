@@ -1,25 +1,69 @@
 from __future__ import annotations
 
-"""Run Nano evaluations with per-split JSON cache.
+"""Evaluate Nano benchmark datasets with embedding models, cross-encoders, or sparse encoders.
 
-Tips:
-- Cache key is file existence only. If you change prompts, dtype, batch size, or
-  other evaluation parameters, remove cached JSON files (or use --override) to
-  force re-evaluation.
-- When datasets/models are already cached locally and you run large evaluations,
-  setting `HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1` can reduce Hugging Face API
-  calls and improve startup/evaluation stability.
+This script supports three evaluation modes:
+1. ``--model-type embedding``: uses ``SentenceTransformer`` + Nano IR evaluators.
+2. ``--model-type cross-encoder``: uses ``CrossEncoder`` + Nano reranking evaluators.
+3. ``--model-type sparse-encoder``: uses ``SparseEncoder`` + Sparse Nano evaluators.
+
+Dataset selection:
+- ``-c/--collection NanoBEIR`` -> ``sentence-transformers/NanoBEIR-en``.
+- ``-c/--collection MNanoBEIR`` -> multilingual NanoBEIR collection.
+- ``-d/--dataset-id ...`` -> generic Nano datasets, e.g. ``hotchpotch/NanoMIRACL``.
+- ``-s/--split-target ...`` -> split filter for NanoBEIR collections only.
+  If omitted, NanoBEIR runs all available benchmark splits.
+
+Cache behavior:
+- Cache key is file existence only (split JSON path).
+- If you change prompts, dtype, batch size, attention, or evaluator settings,
+  remove cached files or use ``--override`` to force re-evaluation.
+
+Offline execution tip:
+- If datasets/models are already cached locally, setting
+  ``HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1`` reduces API traffic and stabilizes
+  large runs.
+
+Quick examples:
+1) Embedding model on all NanoBEIR-en splits
+   ``uv run --with datasets python examples/sentence_transformer/evaluation/nano_eval.py \\
+   --model-type embedding --model intfloat/multilingual-e5-small -c NanoBEIR``
+
+2) Embedding model on multilingual NanoBEIR + extra datasets
+   ``uv run --with datasets python examples/sentence_transformer/evaluation/nano_eval.py \\
+   --model intfloat/multilingual-e5-large -c MNanoBEIR \\
+   -d hotchpotch/NanoMIRACL -d hotchpotch/NanoCodeSearchNet \\
+   --query-prompt "query: " --corpus-prompt "passage: "``
+
+3) Cross-encoder reranking on NanoBEIR-en with bm25 candidates
+   ``uv run --with datasets python examples/sentence_transformer/evaluation/nano_eval.py \\
+   --model-type cross-encoder --model cross-encoder/ms-marco-MiniLM-L6-v2 \\
+   -c NanoBEIR --candidate-subset-name bm25``
+
+4) Cross-encoder reranking with custom candidate subset name
+   ``uv run --with datasets python examples/sentence_transformer/evaluation/nano_eval.py \\
+   --model-type cross-encoder --model your-org/your-reranker \\
+   -d hotchpotch/NanoCodeSearchNet --candidate-subset-name dense``
+
+5) Sparse encoder evaluation on NanoBEIR
+   ``uv run --with datasets python examples/sentence_transformer/evaluation/nano_eval.py \\
+   --model-type sparse-encoder \\
+   --model sparse-encoder/example-inference-free-splade-distilbert-base-uncased-nq \\
+   -c NanoBEIR --query-prompt "query: " --corpus-prompt "passage: "``
 """
 
 import argparse
+import importlib
 import json
 import logging
+import shutil
 import time
+import warnings
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import torch
@@ -31,6 +75,8 @@ from sentence_transformers.evaluation import NanoBEIREvaluator, NanoEvaluator
 from sentence_transformers.evaluation.InformationRetrievalEvaluator import InformationRetrievalEvaluator
 from sentence_transformers.evaluation.NanoBEIREvaluator import DATASET_NAME_TO_HUMAN_READABLE
 from sentence_transformers.model_card import get_versions
+from sentence_transformers.sparse_encoder import SparseEncoder
+from sentence_transformers.sparse_encoder.evaluation import SparseNanoBEIREvaluator, SparseNanoEvaluator
 from sentence_transformers.util import is_datasets_available
 
 logger = logging.getLogger(__name__)
@@ -76,6 +122,33 @@ COLLECTION_TO_EVALUATOR_KIND: dict[str, str] = {
     "mnanobeir": "nanobeir",
 }
 
+HELP_EPILOG = """Examples:
+  # 1) Embedding evaluation on all NanoBEIR-en splits
+  uv run --with datasets python examples/sentence_transformer/evaluation/nano_eval.py \\
+    --model intfloat/multilingual-e5-small -c NanoBEIR
+
+  # 2) Embedding evaluation on MNanoBEIR + custom datasets
+  uv run --with datasets python examples/sentence_transformer/evaluation/nano_eval.py \\
+    --model intfloat/multilingual-e5-large -c MNanoBEIR \\
+    -d hotchpotch/NanoMIRACL -d hotchpotch/NanoCodeSearchNet \\
+    --query-prompt "query: " --corpus-prompt "passage: "
+
+  # 3) Cross-encoder reranking on NanoBEIR-en
+  uv run --with datasets python examples/sentence_transformer/evaluation/nano_eval.py \\
+    --model-type cross-encoder --model cross-encoder/ms-marco-MiniLM-L6-v2 \\
+    -c NanoBEIR --candidate-subset-name bm25
+
+  # 4) Sparse-encoder evaluation on NanoBEIR-en
+  uv run --with datasets python examples/sentence_transformer/evaluation/nano_eval.py \\
+    --model-type sparse-encoder \\
+    --model sparse-encoder/example-inference-free-splade-distilbert-base-uncased-nq \\
+    -c NanoBEIR --query-prompt "query: " --corpus-prompt "passage: "
+
+Notes:
+  - For more context and usage patterns, read this script's top docstring.
+  - If you change parameters, remove cached split JSON files or use --override.
+"""
+
 
 @dataclass(frozen=True)
 class EvalTask:
@@ -87,38 +160,56 @@ class EvalTask:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Evaluate a SentenceTransformer on Nano datasets with split-level JSON cache"
+        description=(
+            "Evaluate Nano datasets with embedding, cross-encoder, or sparse-encoder models, "
+            "with split-level JSON caching."
+        ),
+        epilog=HELP_EPILOG,
+        formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument(
         "--model-type",
         default="embedding",
-        choices=["embedding", "cross-encoder"],
-        help="Evaluation mode: embedding retrieval or cross-encoder reranking.",
+        choices=["embedding", "cross-encoder", "sparse-encoder"],
+        help=(
+            "Model family for evaluation. "
+            "'embedding' uses SentenceTransformer retrieval, "
+            "'cross-encoder' uses reranking evaluators, "
+            "'sparse-encoder' uses SparseEncoder retrieval evaluators."
+        ),
     )
-    parser.add_argument("--model", required=True, help="Model name or local path")
+    parser.add_argument("--model", required=True, help="Model name on Hugging Face Hub or local path.")
     parser.add_argument(
         "--dtype",
         default="bf16",
         choices=["bf16", "fp16", "fp32"],
-        help="Model load dtype. Defaults to bf16.",
+        help="Model dtype for loading/inference.",
     )
     parser.add_argument(
         "--attn-implementation",
         default=None,
-        help="Optional Transformers attention implementation (e.g. 'flash_attention_2').",
+        help="Optional Transformers attention implementation (e.g., 'flash_attention_2').",
     )
     parser.add_argument(
         "--flash-attn2",
         action="store_true",
         help="Shortcut for '--attn-implementation flash_attention_2'.",
     )
-    parser.add_argument("--device", default=None, help="Optional device override (e.g. 'cuda', 'cpu').")
-    parser.add_argument("--trust-remote-code", action="store_true", help="Enable trust_remote_code for model loading.")
+    parser.add_argument(
+        "--device",
+        default=None,
+        help="Device override (e.g., 'cuda', 'cpu'). If omitted, backend auto-selects.",
+    )
+    parser.add_argument(
+        "--trust-remote-code",
+        action="store_true",
+        help="Enable trust_remote_code during model loading.",
+    )
     parser.add_argument(
         "--model-max-seq-length",
         type=int,
         default=None,
-        help="Optional max_seq_length override. If omitted, keep the model default.",
+        help="Optional sequence-length override. If omitted, keep model default.",
     )
 
     parser.add_argument(
@@ -128,7 +219,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Named NanoBEIR collection(s), repeatable or comma-separated. "
-            "Supported: NanoBEIR, MNanoBEIR, MultilingualNanoBEIR"
+            "Supported: NanoBEIR, MNanoBEIR, MultilingualNanoBEIR."
         ),
     )
     parser.add_argument(
@@ -136,7 +227,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Optional extra NanoBEIR dataset id(s), repeatable via comma. "
-            "Used in addition to --collection. Example: sentence-transformers/NanoBEIR-en"
+            "Used in addition to --collection. Example: sentence-transformers/NanoBEIR-en."
         ),
     )
     parser.add_argument(
@@ -146,7 +237,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Optional generic NanoEvaluator dataset id(s), repeatable or comma-separated. "
-            "Example: -d hotchpotch/NanoCodeSearchNet,hotchpotch/NanoMIRACL"
+            "Example: -d hotchpotch/NanoCodeSearchNet,hotchpotch/NanoMIRACL."
         ),
     )
     parser.add_argument(
@@ -156,7 +247,8 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "NanoBEIR split target(s) like msmarco,nq. Repeatable and comma-separated. "
-            "Applies to NanoBEIR collection entries."
+            "Applies to NanoBEIR collection entries only. "
+            "If omitted, all NanoBEIR splits are evaluated."
         ),
     )
     parser.add_argument(
@@ -168,36 +260,48 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--extra-dataset-id",
         default=None,
-        help="Deprecated alias for adding one generic Nano dataset id.",
+        help="Deprecated alias for adding one generic Nano dataset id. Prefer --dataset-id.",
     )
     parser.add_argument(
         "--extra-splits",
         default=None,
-        help="Optional split filter for --extra-dataset-id (comma-separated).",
+        help="Optional split filter for --extra-dataset-id (comma-separated, deprecated path).",
     )
 
-    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--batch-size", type=int, default=32, help="Evaluation batch size.")
     parser.add_argument(
         "--candidate-subset-name",
         default="bm25",
         help=(
             "Candidate retrieval subset/config name used by cross-encoder Nano evaluators "
-            "(e.g., bm25, dense). Default: bm25."
+            "(e.g., bm25, dense). Cross-encoder mode only."
         ),
     )
-    parser.add_argument("--show-progress", action="store_true")
-    parser.add_argument("--query-prompt", default=None)
-    parser.add_argument("--corpus-prompt", default=None)
+    parser.add_argument("--show-progress", action="store_true", help="Show progress bars during evaluation.")
+    parser.add_argument(
+        "--query-prompt",
+        default=None,
+        help="Optional query prefix prompt. Used by embedding/sparse evaluators.",
+    )
+    parser.add_argument(
+        "--corpus-prompt",
+        default=None,
+        help="Optional corpus/document prefix prompt. Used by embedding/sparse evaluators.",
+    )
     parser.add_argument(
         "--output-dir",
         default="output/nano_eval",
-        help="Base output directory. Results are saved to {output-dir}/{model-type}-{model_name}/.",
+        help=("Base output directory. Results are saved to {output-dir}/{model-type}-{model_name}/."),
     )
-    parser.add_argument("--override", action="store_true", help="Re-run evaluations even if split JSON cache exists.")
+    parser.add_argument(
+        "--override",
+        action="store_true",
+        help="Re-run evaluations even if split JSON cache exists.",
+    )
     parser.add_argument(
         "--aggregate-metric",
         default="ndcg@10",
-        help="Metric suffix used for split/all aggregate scoring (default: ndcg@10).",
+        help="Metric suffix used for per-split and overall aggregation (e.g., ndcg@10, map).",
     )
     return parser.parse_args()
 
@@ -295,7 +399,8 @@ def _resolve_query_splits(dataset_id: str) -> list[str]:
     if not is_datasets_available():
         raise ValueError("datasets is not available. Install it to evaluate Nano datasets.")
 
-    from datasets import get_dataset_split_names
+    datasets_module = importlib.import_module("datasets")
+    get_dataset_split_names = getattr(datasets_module, "get_dataset_split_names")
 
     split_names = get_dataset_split_names(dataset_id, "queries")
     if not split_names:
@@ -340,6 +445,7 @@ def resolve_tasks(args: argparse.Namespace) -> list[EvalTask]:
 
     if not deduped:
         raise ValueError("No evaluation tasks were resolved from the given arguments.")
+
     return deduped
 
 
@@ -360,7 +466,7 @@ def _resolve_attn_implementation(args: argparse.Namespace) -> str | None:
     return attn_implementation
 
 
-def load_model(args: argparse.Namespace) -> SentenceTransformer | CrossEncoder:
+def load_model(args: argparse.Namespace) -> SentenceTransformer | CrossEncoder | SparseEncoder:
     attn_implementation = _resolve_attn_implementation(args)
 
     if args.model_type == "embedding":
@@ -381,6 +487,18 @@ def load_model(args: argparse.Namespace) -> SentenceTransformer | CrossEncoder:
     model_kwargs = {"dtype": _resolve_dtype(args.dtype)}
     if attn_implementation is not None:
         model_kwargs["attn_implementation"] = attn_implementation
+
+    if args.model_type == "sparse-encoder":
+        model = SparseEncoder(
+            args.model,
+            device=args.device,
+            trust_remote_code=args.trust_remote_code,
+            model_kwargs=model_kwargs,
+        )
+        if args.model_max_seq_length is not None:
+            model.max_seq_length = args.model_max_seq_length
+        return model
+
     return CrossEncoder(
         args.model,
         device=args.device,
@@ -430,7 +548,7 @@ def _resolve_effective_corpus_prompt(
 
 
 def _resolve_effective_prompts(
-    model: SentenceTransformer | CrossEncoder, args: argparse.Namespace
+    model: SentenceTransformer | CrossEncoder | SparseEncoder, args: argparse.Namespace
 ) -> dict[str, str | None]:
     if args.model_type == "cross-encoder":
         query_source = "cli(--query-prompt)" if args.query_prompt is not None else "none"
@@ -443,7 +561,7 @@ def _resolve_effective_prompts(
         }
 
     if not isinstance(model, SentenceTransformer):
-        raise TypeError("Expected SentenceTransformer model for embedding prompt resolution.")
+        raise TypeError("Expected SentenceTransformer-compatible model for embedding/sparse prompt resolution.")
 
     query_prompt, query_source = _resolve_effective_query_prompt(model, args.query_prompt)
     corpus_prompt, corpus_source = _resolve_effective_corpus_prompt(model, args.corpus_prompt)
@@ -487,8 +605,21 @@ def _resolve_model_output_name(model_name_or_path: str, model_type: str) -> str:
     return f"{_sanitize_output_part(model_type)}-{name_part}"
 
 
+def _migrate_legacy_dense_output_dir(base_output_dir: Path, model_name_or_path: str, model_type: str) -> None:
+    if model_type != "embedding":
+        return
+
+    legacy_output_dir = base_output_dir / _resolve_model_output_name(model_name_or_path, "dense")
+    embedding_output_dir = base_output_dir / _resolve_model_output_name(model_name_or_path, "embedding")
+    if legacy_output_dir.exists() and not embedding_output_dir.exists():
+        shutil.move(str(legacy_output_dir), str(embedding_output_dir))
+        print(f"migrated legacy output dir: {legacy_output_dir} -> {embedding_output_dir}")
+
+
 def _resolve_model_output_dir(args: argparse.Namespace) -> Path:
-    output_dir = Path(args.output_dir) / _resolve_model_output_name(args.model, args.model_type)
+    base_output_dir = Path(args.output_dir)
+    _migrate_legacy_dense_output_dir(base_output_dir, args.model, args.model_type)
+    output_dir = base_output_dir / _resolve_model_output_name(args.model, args.model_type)
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
 
@@ -512,10 +643,30 @@ def _compute_aggregate_metric_value(metrics: dict[str, float], metric_suffix: st
     candidates = _extract_metric_values(metrics, metric_suffix)
     if not candidates:
         raise ValueError(
-            f"Could not find any metric ending with '{metric_suffix}'. "
-            f"Available metric keys include: {list(metrics.keys())[:10]}"
+            f"Could not find any metric ending with '{metric_suffix}'. Available metric keys: {sorted(metrics.keys())}"
         )
     return float(np.mean(candidates))
+
+
+def _warn_deprecated_args(args: argparse.Namespace) -> None:
+    if args.nanobeir_datasets is not None and not parse_repeated_csv(args.split_target):
+        warnings.warn(
+            "--nanobeir-datasets is deprecated; use --split-target instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+    if args.extra_dataset_id is not None:
+        warnings.warn(
+            "--extra-dataset-id is deprecated; use --dataset-id instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+    if args.extra_splits is not None:
+        warnings.warn(
+            "--extra-splits is deprecated; prefer --dataset-id with explicit split targets via the dataset itself.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
 
 def _collect_runtime_environment() -> dict[str, Any]:
@@ -569,6 +720,31 @@ def _create_evaluator(
             raise ValueError(f"Expected exactly one CE evaluator for task {task}, got {len(wrapper.evaluators)}")
         return wrapper.evaluators[0]
 
+    if args.model_type == "sparse-encoder":
+        if task.evaluator_kind == "nanobeir":
+            wrapper = SparseNanoBEIREvaluator(
+                dataset_names=[task.split_name],
+                dataset_id=task.dataset_id,
+                batch_size=args.batch_size,
+                show_progress_bar=args.show_progress,
+                write_csv=False,
+                query_prompts=args.query_prompt,
+                corpus_prompts=args.corpus_prompt,
+            )
+        else:
+            wrapper = SparseNanoEvaluator(
+                dataset_names=[task.split_name],
+                dataset_id=task.dataset_id,
+                batch_size=args.batch_size,
+                show_progress_bar=args.show_progress,
+                write_csv=False,
+                query_prompts=args.query_prompt,
+                corpus_prompts=args.corpus_prompt,
+            )
+        if len(wrapper.evaluators) != 1:
+            raise ValueError(f"Expected exactly one sparse evaluator for task {task}, got {len(wrapper.evaluators)}")
+        return wrapper.evaluators[0]
+
     common_kwargs: dict[str, Any] = {
         "batch_size": args.batch_size,
         "show_progress_bar": args.show_progress,
@@ -595,7 +771,9 @@ def _create_evaluator(
     return wrapper.evaluators[0]
 
 
-def _build_model_metadata(model: SentenceTransformer | CrossEncoder, args: argparse.Namespace) -> dict[str, Any]:
+def _build_model_metadata(
+    model: SentenceTransformer | CrossEncoder | SparseEncoder, args: argparse.Namespace
+) -> dict[str, Any]:
     metadata: dict[str, Any] = {
         "model_type": args.model_type,
         "name_or_path": args.model,
@@ -604,12 +782,20 @@ def _build_model_metadata(model: SentenceTransformer | CrossEncoder, args: argpa
         "attn_implementation": _resolve_attn_implementation(args),
         "trust_remote_code": args.trust_remote_code,
     }
-    if args.model_type == "embedding":
+    if args.model_type in {"embedding", "sparse-encoder"}:
+        if not isinstance(model, SentenceTransformer):
+            raise TypeError(f"Expected SentenceTransformer-compatible model for model_type='{args.model_type}'")
         metadata["max_seq_length"] = model.max_seq_length
         metadata["similarity_fn_name"] = model.similarity_fn_name
+        metadata["max_active_dims"] = (
+            getattr(model, "max_active_dims", None) if args.model_type == "sparse-encoder" else None
+        )
     else:
+        if not isinstance(model, CrossEncoder):
+            raise TypeError(f"Expected CrossEncoder model for model_type='{args.model_type}'")
         metadata["max_seq_length"] = model.max_length
         metadata["similarity_fn_name"] = None
+        metadata["max_active_dims"] = None
     return metadata
 
 
@@ -620,7 +806,7 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 
 def _run_or_load_split(
     task: EvalTask,
-    model: SentenceTransformer | CrossEncoder,
+    model: SentenceTransformer | CrossEncoder | SparseEncoder,
     args: argparse.Namespace,
     prompt_info: dict[str, str | None],
     model_output_dir: Path,
@@ -642,7 +828,21 @@ def _run_or_load_split(
 
     eval_started_at_utc = datetime.now(timezone.utc)
     eval_start = time.perf_counter()
-    metrics = _normalize_metrics(evaluator(model, output_path=None))
+    if args.model_type == "cross-encoder":
+        if not isinstance(model, CrossEncoder):
+            raise TypeError("Cross-encoder mode requires a CrossEncoder model instance.")
+        ce_evaluator = cast(CrossEncoderRerankingEvaluator, evaluator)
+        metrics = _normalize_metrics(ce_evaluator(model, output_path=None))
+    elif args.model_type == "sparse-encoder":
+        if not isinstance(model, SparseEncoder):
+            raise TypeError("sparse-encoder mode requires a SparseEncoder model instance.")
+        ir_evaluator = cast(InformationRetrievalEvaluator, evaluator)
+        metrics = _normalize_metrics(ir_evaluator(model, output_path=None))
+    else:
+        if not isinstance(model, SentenceTransformer):
+            raise TypeError("Embedding mode requires a SentenceTransformer model instance.")
+        ir_evaluator = cast(InformationRetrievalEvaluator, evaluator)
+        metrics = _normalize_metrics(ir_evaluator(model, output_path=None))
     eval_elapsed_seconds = time.perf_counter() - eval_start
     eval_finished_at_utc = datetime.now(timezone.utc)
 
@@ -679,6 +879,7 @@ def _run_or_load_split(
         "evaluation": {
             "started_at_utc": eval_started_at_utc.isoformat(),
             "finished_at_utc": eval_finished_at_utc.isoformat(),
+            # Keep for backward-compatible consumers that read `evaluated_at_utc`.
             "evaluated_at_utc": eval_finished_at_utc.isoformat(),
             "duration_seconds_excluding_dataset_load": float(timing["pure_compute_seconds"]),
             "aggregate_metric": args.aggregate_metric,
@@ -697,7 +898,7 @@ def _run_or_load_split(
 
 
 def _build_all_payload(
-    model: SentenceTransformer | CrossEncoder,
+    model: SentenceTransformer | CrossEncoder | SparseEncoder,
     args: argparse.Namespace,
     prompt_info: dict[str, str | None],
     environment: dict[str, Any],
@@ -706,10 +907,12 @@ def _build_all_payload(
     split_entries: list[dict[str, Any]] = []
     aggregate_metric_values: list[float] = []
 
-    timing_totals: dict[str, float] = {key: 0.0 for key in TIMING_KEYS}
+    timing_totals_all: dict[str, float] = {key: 0.0 for key in TIMING_KEYS}
+    timing_totals_this_run: dict[str, float] = {key: 0.0 for key in TIMING_KEYS}
 
     for result in split_results:
         payload = result["payload"]
+        cache_hit = bool(result["cache_hit"])
         evaluation = payload.get("evaluation", {})
         timing = evaluation.get("timing", {})
         aggregate_metric_value = evaluation.get("aggregate_metric_value")
@@ -720,14 +923,17 @@ def _build_all_payload(
         for key in TIMING_KEYS:
             value = timing.get(key)
             if isinstance(value, (int, float)):
-                timing_totals[key] += float(value)
+                float_value = float(value)
+                timing_totals_all[key] += float_value
+                if not cache_hit:
+                    timing_totals_this_run[key] += float_value
 
         split_entry = {
             "target_name": payload.get("target", {}).get("target_name"),
             "dataset_id": payload.get("target", {}).get("dataset_id"),
             "split_name": payload.get("target", {}).get("split_name"),
             "evaluator_kind": payload.get("target", {}).get("evaluator_kind"),
-            "cache_hit": bool(result["cache_hit"]),
+            "cache_hit": cache_hit,
             "result_path": result["output_path"],
             "aggregate_metric": evaluation.get("aggregate_metric"),
             "aggregate_metric_value": aggregate_metric_value,
@@ -767,8 +973,10 @@ def _build_all_payload(
             "aggregate_metric_mean": float(np.mean(aggregate_metric_values)) if aggregate_metric_values else None,
             "cache_hit_count": sum(1 for entry in split_entries if entry["cache_hit"]),
             "evaluated_count": sum(1 for entry in split_entries if not entry["cache_hit"]),
-            "timing_seconds": timing_totals,
-            "total_duration_seconds_excluding_dataset_load": timing_totals["pure_compute_seconds"],
+            "timing_seconds_this_run": timing_totals_this_run,
+            "timing_seconds_all_splits": timing_totals_all,
+            "total_duration_seconds_excluding_dataset_load": timing_totals_this_run["pure_compute_seconds"],
+            "total_duration_seconds_excluding_dataset_load_all_splits": timing_totals_all["pure_compute_seconds"],
         },
         "target_summaries": target_summaries,
         "splits": split_entries,
@@ -788,6 +996,7 @@ def _print_eval_plan(tasks: list[EvalTask]) -> None:
 
 def main() -> None:
     args = parse_args()
+    _warn_deprecated_args(args)
     model = load_model(args)
     prompt_info = _resolve_effective_prompts(model, args)
     _print_effective_prompts(prompt_info)
