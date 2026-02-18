@@ -58,7 +58,6 @@ import json
 import logging
 import shutil
 import time
-import warnings
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -251,22 +250,6 @@ def parse_args() -> argparse.Namespace:
             "If omitted, all NanoBEIR splits are evaluated."
         ),
     )
-    parser.add_argument(
-        "--nanobeir-datasets",
-        default=None,
-        help="Deprecated alias for split targets when --split-target is not set.",
-    )
-
-    parser.add_argument(
-        "--extra-dataset-id",
-        default=None,
-        help="Deprecated alias for adding one generic Nano dataset id. Prefer --dataset-id.",
-    )
-    parser.add_argument(
-        "--extra-splits",
-        default=None,
-        help="Optional split filter for --extra-dataset-id (comma-separated, deprecated path).",
-    )
 
     parser.add_argument("--batch-size", type=int, default=32, help="Evaluation batch size.")
     parser.add_argument(
@@ -366,9 +349,6 @@ def resolve_collection_dataset_entries(args: argparse.Namespace) -> list[tuple[s
         for dataset_id in parse_repeated_csv(args.dataset_id):
             entries.append(("nano", dataset_id))
 
-    if args.extra_dataset_id is not None:
-        entries.append(("nano", args.extra_dataset_id))
-
     if not entries:
         entries = [("nanobeir", "sentence-transformers/NanoBEIR-en")]
 
@@ -382,14 +362,10 @@ def resolve_collection_dataset_entries(args: argparse.Namespace) -> list[tuple[s
     return deduped
 
 
-def resolve_nanobeir_split_targets(args: argparse.Namespace, entries: list[tuple[str, str]]) -> list[str] | None:
+def resolve_nanobeir_split_targets(args: argparse.Namespace) -> list[str] | None:
     split_targets = parse_repeated_csv(args.split_target)
     if split_targets:
         return split_targets
-
-    fallback_targets = parse_csv(args.nanobeir_datasets)
-    if fallback_targets:
-        return fallback_targets
 
     # Default behavior: evaluate all NanoBEIR splits when split targets are omitted.
     return None
@@ -410,9 +386,8 @@ def _resolve_query_splits(dataset_id: str) -> list[str]:
 
 def resolve_tasks(args: argparse.Namespace) -> list[EvalTask]:
     entries = resolve_collection_dataset_entries(args)
-    nanobeir_split_targets = resolve_nanobeir_split_targets(args, entries)
+    nanobeir_split_targets = resolve_nanobeir_split_targets(args)
     all_nanobeir_splits = list(DATASET_NAME_TO_HUMAN_READABLE.keys())
-    extra_dataset_splits = set(parse_csv(args.extra_splits)) if args.extra_splits else None
 
     tasks: list[EvalTask] = []
     for evaluator_kind, dataset_id in entries:
@@ -421,8 +396,6 @@ def resolve_tasks(args: argparse.Namespace) -> list[EvalTask]:
             split_names = nanobeir_split_targets if nanobeir_split_targets is not None else all_nanobeir_splits
         else:
             split_names = _resolve_query_splits(dataset_id)
-            if extra_dataset_splits and args.extra_dataset_id == dataset_id:
-                split_names = [split_name for split_name in split_names if split_name in extra_dataset_splits]
 
         for split_name in split_names:
             tasks.append(
@@ -646,27 +619,6 @@ def _compute_aggregate_metric_value(metrics: dict[str, float], metric_suffix: st
             f"Could not find any metric ending with '{metric_suffix}'. Available metric keys: {sorted(metrics.keys())}"
         )
     return float(np.mean(candidates))
-
-
-def _warn_deprecated_args(args: argparse.Namespace) -> None:
-    if args.nanobeir_datasets is not None and not parse_repeated_csv(args.split_target):
-        warnings.warn(
-            "--nanobeir-datasets is deprecated; use --split-target instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-    if args.extra_dataset_id is not None:
-        warnings.warn(
-            "--extra-dataset-id is deprecated; use --dataset-id instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-    if args.extra_splits is not None:
-        warnings.warn(
-            "--extra-splits is deprecated; prefer --dataset-id with explicit split targets via the dataset itself.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
 
 
 def _collect_runtime_environment() -> dict[str, Any]:
@@ -996,7 +948,6 @@ def _print_eval_plan(tasks: list[EvalTask]) -> None:
 
 def main() -> None:
     args = parse_args()
-    _warn_deprecated_args(args)
     model = load_model(args)
     prompt_info = _resolve_effective_prompts(model, args)
     _print_effective_prompts(prompt_info)
