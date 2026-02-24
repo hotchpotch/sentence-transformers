@@ -24,11 +24,44 @@ logger = logging.getLogger(__name__)
 
 
 class SparseNanoEvaluator(NanoEvaluator):
-    """Generic Nano-style evaluator for sparse encoders.
+    """
+    Generic Nano-style evaluator for sparse encoders.
 
     This class extends :class:`~sentence_transformers.evaluation.NanoEvaluator`
-    and adds sparse-specific aggregation metrics (active dims, sparsity ratio, FLOPS)
-    on top of the standard IR metrics.
+    and adds sparse-specific aggregation metrics (active dimensions, sparsity
+    ratio, FLOPS) on top of standard IR metrics.
+
+    Sparse metrics are aggregated across evaluated subsets and emitted with the
+    same aggregate prefix as IR metrics (for example ``NanoBEIR_mean_avg_flops``).
+
+    Args:
+        dataset_names (list[str] | None): Dataset names or split names to evaluate.
+        dataset_id (str): Hugging Face dataset ID.
+        mrr_at_k (list[int]): ``k`` values for MRR.
+        ndcg_at_k (list[int]): ``k`` values for nDCG.
+        accuracy_at_k (list[int]): ``k`` values for accuracy.
+        precision_recall_at_k (list[int]): ``k`` values for precision/recall.
+        map_at_k (list[int]): ``k`` values for MAP.
+        show_progress_bar (bool): Whether to show progress bars.
+        batch_size (int): Evaluation batch size.
+        write_csv (bool): Whether to write aggregated metrics CSV.
+        max_active_dims (int | None): Optional cap for active sparse dimensions.
+        score_functions (dict[str, Callable[[Tensor, Tensor], Tensor]] | None):
+            Optional custom score functions.
+        main_score_function (str | SimilarityFunction | None): Optional main score function.
+        aggregate_fn (Callable[[list[float]], float]): Aggregation function across datasets.
+        aggregate_key (str): Aggregate metric key prefix.
+        query_prompts (str | dict[str, str] | None): Query prompt(s), global or per-dataset.
+        corpus_prompts (str | dict[str, str] | None): Corpus prompt(s), global or per-dataset.
+        write_predictions (bool): Whether to write per-query predictions JSONL.
+        dataset_name_to_human_readable (Mapping[str, str] | None): Optional short-name mapping.
+        split_prefix (str): Optional split prefix applied in mapping mode.
+        strict_dataset_name_validation (bool): Whether to validate names strictly against mapping.
+        auto_expand_splits_when_dataset_names_none (bool): Whether to infer dataset names from query splits.
+        corpus_subset_name (str): Subset name for corpus.
+        queries_subset_name (str): Subset name for queries.
+        qrels_subset_name (str): Subset name for qrels.
+        name (str | None): Optional base name for aggregate metric prefixes.
     """
 
     information_retrieval_class = SparseInformationRetrievalEvaluator

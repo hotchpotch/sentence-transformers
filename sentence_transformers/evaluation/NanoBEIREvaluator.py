@@ -43,48 +43,161 @@ DATASET_NAME_TO_HUMAN_READABLE: dict[str, str] = {
 
 
 class NanoBEIREvaluator(NanoEvaluator):
-    """Evaluate a SentenceTransformer model on NanoBEIR datasets.
+    """
+    This class evaluates the performance of a SentenceTransformer Model on the NanoBEIR collection of Information Retrieval datasets.
 
-    The NanoBEIR collection consists of downsized BEIR retrieval datasets for
-    fast, practical benchmarking before running full-scale BEIR evaluations.
-    Datasets are available in the Sentence Transformers
-    `NanoBEIR collection <https://huggingface.co/collections/sentence-transformers/nanobeir-datasets>`_.
+    The NanoBEIR collection consists of downsized versions of several BEIR information-retrieval datasets, making it
+    suitable for quickly benchmarking a model's retrieval performance before running a full-scale BEIR evaluation.
+    The datasets are available on Hugging Face in the Sentence Transformers `NanoBEIR collection <https://huggingface.co/collections/sentence-transformers/nanobeir-datasets>`_,
+    which reformats the `original collection <https://huggingface.co/collections/zeta-alpha-ai/nanobeir>`_ from Zeta Alpha
+    into the default `NanoBEIR-en <https://huggingface.co/datasets/sentence-transformers/NanoBEIR-en>`_ dataset,
+    alongside many translated versions.
+    This evaluator reports the same metrics as the :class:`~sentence_transformers.evaluation.InformationRetrievalEvaluator`
+    (e.g., MRR, nDCG, Recall@k) for each dataset individually, as well as aggregated across all datasets.
 
-    This class preserves the NanoBEIR short-name API (e.g., ``msmarco``, ``nq``),
-    while delegating shared loading and aggregation mechanics to
+    This class preserves the NanoBEIR short-name API and delegates dataset-agnostic loading/aggregation mechanics to
     :class:`~sentence_transformers.evaluation.NanoEvaluator`.
-    It reports the same IR metrics as
-    :class:`~sentence_transformers.evaluation.InformationRetrievalEvaluator`
-    for each dataset and for the aggregated score.
 
     Args:
-        dataset_names (List[str]): NanoBEIR short names to evaluate.
-            If not specified, all predefined NanoBEIR datasets are used.
-        dataset_id (str): Hugging Face dataset ID. Must contain ``corpus``,
-            ``queries``, and ``qrels`` subsets with ``Nano{DatasetName}`` splits.
-        mrr_at_k (List[int]): ``k`` values for MRR. Defaults to ``[10]``.
-        ndcg_at_k (List[int]): ``k`` values for nDCG. Defaults to ``[10]``.
-        accuracy_at_k (List[int]): ``k`` values for accuracy. Defaults to ``[1, 3, 5, 10]``.
-        precision_recall_at_k (List[int]): ``k`` values for precision/recall. Defaults to ``[1, 3, 5, 10]``.
-        map_at_k (List[int]): ``k`` values for MAP. Defaults to ``[100]``.
-        show_progress_bar (bool): Whether to show progress bars.
-        batch_size (int): Batch size for evaluation.
-        write_csv (bool): Whether to write CSV metrics.
-        truncate_dim (int, optional): Optional embedding truncation dimension.
-        score_functions (Dict[str, Callable[[Tensor, Tensor], Tensor]], optional):
-            Optional custom score functions.
-        main_score_function (str | SimilarityFunction, optional):
-            Optional main score function.
-        aggregate_fn (Callable[[list[float]], float]): Aggregation function across datasets.
-        aggregate_key (str): Aggregate metric key prefix.
-        query_prompts (str | dict[str, str], optional): Query prompt(s).
-        corpus_prompts (str | dict[str, str], optional): Corpus prompt(s).
-        write_predictions (bool): Whether to write per-query predictions.
+        dataset_names (List[str]): The short names of the datasets to evaluate on (e.g., "climatefever", "msmarco").
+            If not specified, all predefined NanoBEIR datasets are used. The full list of available datasets is:
+            "climatefever", "dbpedia", "fever", "fiqa2018", "hotpotqa", "msmarco", "nfcorpus", "nq", "quoraretrieval",
+            "scidocs", "arguana", "scifact", and "touche2020".
+        dataset_id (str): The HuggingFace dataset ID to load the datasets from. Defaults to
+            "sentence-transformers/NanoBEIR-en". The dataset must contain "corpus", "queries", and "qrels"
+            subsets for each NanoBEIR dataset, stored under splits named ``Nano{DatasetName}`` (for example,
+            ``NanoMSMARCO`` or ``NanoNFCorpus``).
+        mrr_at_k (List[int]): A list of integers representing the values of k for MRR calculation. Defaults to [10].
+        ndcg_at_k (List[int]): A list of integers representing the values of k for NDCG calculation. Defaults to [10].
+        accuracy_at_k (List[int]): A list of integers representing the values of k for accuracy calculation. Defaults to [1, 3, 5, 10].
+        precision_recall_at_k (List[int]): A list of integers representing the values of k for precision and recall calculation. Defaults to [1, 3, 5, 10].
+        map_at_k (List[int]): A list of integers representing the values of k for MAP calculation. Defaults to [100].
+        show_progress_bar (bool): Whether to show a progress bar during evaluation. Defaults to False.
+        batch_size (int): The batch size for evaluation. Defaults to 32.
+        write_csv (bool): Whether to write the evaluation results to a CSV file. Defaults to True.
+        truncate_dim (int, optional): The dimension to truncate the embeddings to. Defaults to None.
+        score_functions (Dict[str, Callable[[Tensor, Tensor], Tensor]]): A dictionary mapping score function names to score functions. Defaults to {SimilarityFunction.COSINE.value: cos_sim, SimilarityFunction.DOT_PRODUCT.value: dot_score}.
+        main_score_function (Union[str, SimilarityFunction], optional): The main score function to use for evaluation. Defaults to None.
+        aggregate_fn (Callable[[list[float]], float]): The function to aggregate the scores. Defaults to np.mean.
+        aggregate_key (str): The key to use for the aggregated score. Defaults to "mean".
+        query_prompts (str | dict[str, str], optional): The prompts to add to the queries. If a string, will add the same prompt to all queries. If a dict, expects that all datasets in dataset_names are keys.
+        corpus_prompts (str | dict[str, str], optional): The prompts to add to the corpus. If a string, will add the same prompt to all corpus. If a dict, expects that all datasets in dataset_names are keys.
+        write_predictions (bool): Whether to write the predictions to a JSONL file. Defaults to False.
+            This can be useful for downstream evaluation as it can be used as input to the :class:`~sentence_transformers.sparse_encoder.evaluation.ReciprocalRankFusionEvaluator` that accept precomputed predictions.
 
     .. tip::
 
-        See the NanoBEIR collection for translated dataset IDs with the same
-        format and split conventions.
+        See this `NanoBEIR datasets collection on Hugging Face <https://huggingface.co/collections/sentence-transformers/nanobeir-datasets>`_
+        with valid NanoBEIR ``dataset_id`` options for different languages.
+
+    Example:
+        ::
+
+            from sentence_transformers import SentenceTransformer
+            from sentence_transformers.evaluation import NanoBEIREvaluator
+
+            model = SentenceTransformer('intfloat/multilingual-e5-large-instruct')
+
+            datasets = ["QuoraRetrieval", "MSMARCO"]
+            query_prompts = {
+                "QuoraRetrieval": "Instruct: Given a question, retrieve questions that are semantically equivalent to the given question\\nQuery: ",
+                "MSMARCO": "Instruct: Given a web search query, retrieve relevant passages that answer the query\\nQuery: "
+            }
+
+            evaluator = NanoBEIREvaluator(
+                dataset_names=datasets,
+                query_prompts=query_prompts,
+            )
+
+            results = evaluator(model)
+            '''
+            NanoBEIR Evaluation of the model on ['QuoraRetrieval', 'MSMARCO'] dataset:
+            Evaluating NanoQuoraRetrieval
+            Information Retrieval Evaluation of the model on the NanoQuoraRetrieval dataset:
+            Queries: 50
+            Corpus: 5046
+
+            Score-Function: cosine
+            Accuracy@1: 92.00%
+            Accuracy@3: 98.00%
+            Accuracy@5: 100.00%
+            Accuracy@10: 100.00%
+            Precision@1: 92.00%
+            Precision@3: 40.67%
+            Precision@5: 26.00%
+            Precision@10: 14.00%
+            Recall@1: 81.73%
+            Recall@3: 94.20%
+            Recall@5: 97.93%
+            Recall@10: 100.00%
+            MRR@10: 0.9540
+            NDCG@10: 0.9597
+            MAP@100: 0.9395
+
+            Evaluating NanoMSMARCO
+            Information Retrieval Evaluation of the model on the NanoMSMARCO dataset:
+            Queries: 50
+            Corpus: 5043
+
+            Score-Function: cosine
+            Accuracy@1: 40.00%
+            Accuracy@3: 74.00%
+            Accuracy@5: 78.00%
+            Accuracy@10: 88.00%
+            Precision@1: 40.00%
+            Precision@3: 24.67%
+            Precision@5: 15.60%
+            Precision@10: 8.80%
+            Recall@1: 40.00%
+            Recall@3: 74.00%
+            Recall@5: 78.00%
+            Recall@10: 88.00%
+            MRR@10: 0.5849
+            NDCG@10: 0.6572
+            MAP@100: 0.5892
+            Average Queries: 50.0
+            Average Corpus: 5044.5
+
+            Aggregated for Score Function: cosine
+            Accuracy@1: 66.00%
+            Accuracy@3: 86.00%
+            Accuracy@5: 89.00%
+            Accuracy@10: 94.00%
+            Precision@1: 66.00%
+            Recall@1: 60.87%
+            Precision@3: 32.67%
+            Recall@3: 84.10%
+            Precision@5: 20.80%
+            Recall@5: 87.97%
+            Precision@10: 11.40%
+            Recall@10: 94.00%
+            MRR@10: 0.7694
+            NDCG@10: 0.8085
+            '''
+            print(evaluator.primary_metric)
+            # => "NanoBEIR_mean_cosine_ndcg@10"
+            print(results[evaluator.primary_metric])
+            # => 0.8084508771660436
+
+        Evaluating on custom/translated datasets::
+
+            import logging
+            from pprint import pprint
+
+            from sentence_transformers import SentenceTransformer
+            from sentence_transformers.evaluation import NanoBEIREvaluator
+
+            logging.basicConfig(format="%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S", level=logging.INFO)
+
+            model = SentenceTransformer("google/embeddinggemma-300m")
+            evaluator = NanoBEIREvaluator(
+                ["msmarco", "nq"],
+                dataset_id="lightonai/NanoBEIR-de",
+                batch_size=32,
+            )
+            results = evaluator(model)
+            print(results[evaluator.primary_metric])
+            pprint({key: value for key, value in results.items() if "ndcg@10" in key})
     """
 
     def __init__(

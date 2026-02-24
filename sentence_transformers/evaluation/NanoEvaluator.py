@@ -21,10 +21,13 @@ logger = logging.getLogger(__name__)
 
 
 class NanoEvaluator(SentenceEvaluator):
-    """Generic evaluator for Nano-style IR datasets on Hugging Face.
+    """
+    Generic evaluator for Nano-style Information Retrieval datasets on Hugging Face.
 
     This evaluator expects ``corpus``, ``queries``, and ``qrels`` subsets and computes
     IR metrics via :class:`~sentence_transformers.evaluation.InformationRetrievalEvaluator`.
+    It is dataset-agnostic and powers specialized evaluators such as
+    :class:`~sentence_transformers.evaluation.NanoBEIREvaluator`.
 
     Dataset-name handling supports two modes:
 
@@ -35,6 +38,40 @@ class NanoEvaluator(SentenceEvaluator):
        the split directly.
 
     If ``dataset_names`` is ``None``, split names are expanded from the ``queries`` subset.
+    Set ``auto_expand_splits_when_dataset_names_none=False`` to require explicit names.
+
+    Aggregate metrics are prefixed by ``{name}_{aggregate_key}``.
+    For example: ``NanoBEIR_mean_cosine_ndcg@10``.
+
+    Args:
+        dataset_names (list[str] | None): Dataset names or split names to evaluate.
+            ``None`` can be used with auto-expansion from available query splits.
+        dataset_id (str): Hugging Face dataset ID.
+        mrr_at_k (list[int]): ``k`` values for MRR.
+        ndcg_at_k (list[int]): ``k`` values for nDCG.
+        accuracy_at_k (list[int]): ``k`` values for accuracy.
+        precision_recall_at_k (list[int]): ``k`` values for precision/recall.
+        map_at_k (list[int]): ``k`` values for MAP.
+        show_progress_bar (bool): Whether to show progress bars.
+        batch_size (int): Evaluation batch size.
+        write_csv (bool): Whether to write aggregated metrics CSV.
+        truncate_dim (int | None): Optional embedding truncation dimension.
+        score_functions (dict[str, Callable[[Tensor, Tensor], Tensor]] | None):
+            Optional custom score functions.
+        main_score_function (str | SimilarityFunction | None): Optional main score function.
+        aggregate_fn (Callable[[list[float]], float]): Aggregation function across datasets.
+        aggregate_key (str): Aggregate metric key prefix.
+        query_prompts (str | dict[str, str] | None): Query prompt(s), global or per-dataset.
+        corpus_prompts (str | dict[str, str] | None): Corpus prompt(s), global or per-dataset.
+        write_predictions (bool): Whether to write per-query predictions JSONL.
+        dataset_name_to_human_readable (Mapping[str, str] | None): Optional short-name mapping.
+        split_prefix (str): Optional split prefix applied in mapping mode.
+        strict_dataset_name_validation (bool): Whether to validate names strictly against mapping.
+        auto_expand_splits_when_dataset_names_none (bool): Whether to infer dataset names from query splits.
+        corpus_subset_name (str): Subset name for corpus.
+        queries_subset_name (str): Subset name for queries.
+        qrels_subset_name (str): Subset name for qrels.
+        name (str | None): Optional base name for aggregate metric prefixes.
     """
 
     information_retrieval_class = InformationRetrievalEvaluator

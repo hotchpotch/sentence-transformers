@@ -19,7 +19,43 @@ logger = logging.getLogger(__name__)
 
 
 class CrossEncoderNanoEvaluator(SentenceEvaluator):
-    """Generic cross-encoder evaluator for Nano-style IR datasets on Hugging Face."""
+    """
+    Generic cross-encoder evaluator for Nano-style IR datasets on Hugging Face.
+
+    This evaluator expects ``corpus``, ``queries``, ``qrels``, and a first-stage
+    candidate subset (``candidate_subset_name``, default ``bm25``). It reranks the
+    top ``rerank_k`` candidates per query and reports MAP / MRR@k / nDCG@k via
+    :class:`~sentence_transformers.cross_encoder.evaluation.CrossEncoderRerankingEvaluator`.
+
+    Dataset-name handling supports both mapping mode (short name -> split name)
+    and direct split mode, mirroring :class:`~sentence_transformers.evaluation.NanoEvaluator`.
+
+    The deprecated ``bm25_subset_name`` alias is still accepted for backward
+    compatibility and mapped to ``candidate_subset_name``.
+
+    Args:
+        dataset_names (list[str] | None): Dataset names or split names to evaluate.
+        dataset_id (str): Hugging Face dataset ID.
+        rerank_k (int): Number of candidates reranked per query.
+        at_k (int): Metric cutoff for MRR/nDCG.
+        always_rerank_positives (bool): Whether to enforce positives in rerank pool.
+        batch_size (int): Evaluation batch size.
+        show_progress_bar (bool): Whether to show progress bars.
+        write_csv (bool): Whether to write aggregated metrics CSV.
+        aggregate_fn (Callable[[list[float]], float]): Aggregation function across datasets.
+        aggregate_key (str): Aggregate metric key prefix.
+        dataset_name_to_human_readable (Mapping[str, str] | None): Optional short-name mapping.
+        split_prefix (str): Optional split prefix applied in mapping mode.
+        strict_dataset_name_validation (bool): Whether to validate names strictly against mapping.
+        auto_expand_splits_when_dataset_names_none (bool): Whether to infer dataset names from query splits.
+        corpus_subset_name (str): Subset name for corpus.
+        queries_subset_name (str): Subset name for queries.
+        qrels_subset_name (str): Subset name for qrels.
+        candidate_subset_name (str): First-stage candidate subset name.
+        bm25_subset_name (str | None): Deprecated alias of ``candidate_subset_name``.
+        retrieved_corpus_ids_column (str): Column name containing candidate corpus IDs.
+        name (str | None): Optional base name for aggregate metric prefixes.
+    """
 
     reranking_evaluator_class = CrossEncoderRerankingEvaluator
 
