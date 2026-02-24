@@ -174,7 +174,7 @@ class CrossEncoderNanoEvaluator(SentenceEvaluator):
             evaluation = evaluator(model, output_path, epoch, steps)
             evaluator_prefix = f"{evaluator.name}_"
             for full_key, metric_value in evaluation.items():
-                # Parse metrics by the concrete sub-evaluator prefix to avoid underscore-splitting bugs.
+                # Metric keys are prefixed with "{evaluator.name}_"; strip that prefix when present.
                 metric = full_key[len(evaluator_prefix) :] if full_key.startswith(evaluator_prefix) else full_key
                 per_metric_results.setdefault(metric, []).append(metric_value)
                 per_dataset_results[full_key] = metric_value
@@ -499,7 +499,7 @@ class CrossEncoderNanoEvaluator(SentenceEvaluator):
             )
 
     def get_config_dict(self) -> dict[str, Any]:
-        return {
+        config_dict: dict[str, Any] = {
             "dataset_names": self.dataset_names,
             "dataset_id": self.dataset_id,
             "rerank_k": self.rerank_k,
