@@ -91,18 +91,18 @@ def fake_datasets_module() -> Any:
         add_split("sentence-transformers/NanoBEIR-en", split)
 
     for split in ["python", "java"]:
-        add_split("hotchpotch/NanoCodeSearchNet", split)
+        add_split("example/NanoFooBar", split)
 
     split_names: dict[tuple[str, str], list[str]] = {
         ("sentence-transformers/NanoBEIR-en", "corpus"): ["NanoMSMARCO", "NanoNQ"],
         ("sentence-transformers/NanoBEIR-en", "queries"): ["NanoMSMARCO", "NanoNQ"],
         ("sentence-transformers/NanoBEIR-en", "qrels"): ["NanoMSMARCO", "NanoNQ"],
         ("sentence-transformers/NanoBEIR-en", "bm25"): ["NanoMSMARCO", "NanoNQ"],
-        ("hotchpotch/NanoCodeSearchNet", "corpus"): ["python", "java"],
-        ("hotchpotch/NanoCodeSearchNet", "queries"): ["python", "java"],
-        ("hotchpotch/NanoCodeSearchNet", "qrels"): ["python", "java"],
-        ("hotchpotch/NanoCodeSearchNet", "dense"): ["python", "java"],
-        ("hotchpotch/NanoCodeSearchNet", "bm25"): ["python", "java"],
+        ("example/NanoFooBar", "corpus"): ["python", "java"],
+        ("example/NanoFooBar", "queries"): ["python", "java"],
+        ("example/NanoFooBar", "qrels"): ["python", "java"],
+        ("example/NanoFooBar", "dense"): ["python", "java"],
+        ("example/NanoFooBar", "bm25"): ["python", "java"],
     }
 
     def load_dataset(dataset_id: str, subset: str, split: str) -> FakeDataset:
@@ -133,7 +133,7 @@ def test_cross_encoder_nano_evaluator_auto_expand_with_custom_candidate_subset(
 ) -> None:
     evaluator = CrossEncoderNanoEvaluator(
         dataset_names=None,
-        dataset_id="hotchpotch/NanoCodeSearchNet",
+        dataset_id="example/NanoFooBar",
         write_csv=False,
         candidate_subset_name="dense",
         retrieved_corpus_ids_column="retrieved-ids",
@@ -141,12 +141,12 @@ def test_cross_encoder_nano_evaluator_auto_expand_with_custom_candidate_subset(
 
     assert evaluator.dataset_names == ["python", "java"]
     assert [sub_evaluator.name for sub_evaluator in evaluator.evaluators] == [
-        "NanoCodeSearchNet_python_R100",
-        "NanoCodeSearchNet_java_R100",
+        "NanoFooBar_python_R100",
+        "NanoFooBar_java_R100",
     ]
 
     metrics = evaluator(dummy_cross_encoder)
-    assert "NanoCodeSearchNet_R100_mean_ndcg@10" in metrics
+    assert "NanoFooBar_R100_mean_ndcg@10" in metrics
 
 
 def test_cross_encoder_nano_evaluator_bm25_alias_keeps_backward_compatibility(
@@ -155,14 +155,14 @@ def test_cross_encoder_nano_evaluator_bm25_alias_keeps_backward_compatibility(
 ) -> None:
     evaluator = CrossEncoderNanoEvaluator(
         dataset_names=["python"],
-        dataset_id="hotchpotch/NanoCodeSearchNet",
+        dataset_id="example/NanoFooBar",
         write_csv=False,
         bm25_subset_name="dense",
         retrieved_corpus_ids_column="retrieved-ids",
     )
     assert evaluator.candidate_subset_name == "dense"
     metrics = evaluator(dummy_cross_encoder)
-    assert "NanoCodeSearchNet_python_R100_ndcg@10" in metrics
+    assert "NanoFooBar_python_R100_ndcg@10" in metrics
 
 
 def test_cross_encoder_nano_evaluator_mapping_validates_split_exists(monkeypatch: pytest.MonkeyPatch) -> None:

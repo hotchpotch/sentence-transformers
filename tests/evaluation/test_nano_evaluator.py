@@ -111,15 +111,15 @@ def fake_datasets_module() -> Any:
         add_split("sentence-transformers/NanoBEIR-en", split)
 
     for split in ["python", "java"]:
-        add_split("hotchpotch/NanoCodeSearchNet", split)
+        add_split("example/NanoFooBar", split)
 
     split_names: dict[tuple[str, str], list[str]] = {
         ("sentence-transformers/NanoBEIR-en", "corpus"): ["NanoMSMARCO", "NanoNQ"],
         ("sentence-transformers/NanoBEIR-en", "queries"): ["NanoMSMARCO", "NanoNQ"],
         ("sentence-transformers/NanoBEIR-en", "qrels"): ["NanoMSMARCO", "NanoNQ"],
-        ("hotchpotch/NanoCodeSearchNet", "corpus"): ["python", "java"],
-        ("hotchpotch/NanoCodeSearchNet", "queries"): ["python", "java"],
-        ("hotchpotch/NanoCodeSearchNet", "qrels"): ["python", "java"],
+        ("example/NanoFooBar", "corpus"): ["python", "java"],
+        ("example/NanoFooBar", "queries"): ["python", "java"],
+        ("example/NanoFooBar", "qrels"): ["python", "java"],
     }
 
     def load_dataset(dataset_id: str, subset: str, split: str) -> FakeDataset:
@@ -143,7 +143,7 @@ def patch_nano_eval(monkeypatch: pytest.MonkeyPatch, fake_datasets_module: Any) 
 def test_nano_evaluator_auto_expand_splits_and_auto_names(patch_nano_eval: None, dummy_model: Any) -> None:
     evaluator = NanoEvaluator(
         dataset_names=None,
-        dataset_id="hotchpotch/NanoCodeSearchNet",
+        dataset_id="example/NanoFooBar",
         mrr_at_k=[10],
         ndcg_at_k=[10],
         accuracy_at_k=[1],
@@ -155,13 +155,13 @@ def test_nano_evaluator_auto_expand_splits_and_auto_names(patch_nano_eval: None,
 
     assert evaluator.dataset_names == ["python", "java"]
     assert [sub_evaluator.name for sub_evaluator in evaluator.evaluators] == [
-        "NanoCodeSearchNet_python",
-        "NanoCodeSearchNet_java",
+        "NanoFooBar_python",
+        "NanoFooBar_java",
     ]
 
     metrics = evaluator(dummy_model)
-    assert evaluator.primary_metric == "NanoCodeSearchNet_mean_cosine_ndcg@10"
-    assert "NanoCodeSearchNet_mean_cosine_ndcg@10" in metrics
+    assert evaluator.primary_metric == "NanoFooBar_mean_cosine_ndcg@10"
+    assert "NanoFooBar_mean_cosine_ndcg@10" in metrics
 
 
 def test_nano_evaluator_mapping_validates_split_exists(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -210,7 +210,7 @@ def test_sequential_evaluator_with_nanobeir_and_nanocodesearchnet(
     )
     nanocodesearchnet_evaluator = NanoEvaluator(
         dataset_names=["python"],
-        dataset_id="hotchpotch/NanoCodeSearchNet",
+        dataset_id="example/NanoFooBar",
         mrr_at_k=[10],
         ndcg_at_k=[10],
         accuracy_at_k=[1],
@@ -228,5 +228,5 @@ def test_sequential_evaluator_with_nanobeir_and_nanocodesearchnet(
 
     assert "sequential_score" in metrics
     assert any(key.startswith("NanoBEIR_mean_") for key in metrics)
-    assert any(key.startswith("NanoCodeSearchNet_mean_") for key in metrics)
+    assert any(key.startswith("NanoFooBar_mean_") for key in metrics)
     assert "NanoBEIR_mean_cosine_ndcg@10" in metrics
