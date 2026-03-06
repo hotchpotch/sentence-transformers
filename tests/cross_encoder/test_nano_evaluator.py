@@ -55,7 +55,7 @@ def fake_datasets_module() -> Any:
             "sentence-transformers/NanoBEIR-en": ["NanoMSMARCO", "NanoNQ"],
             "example/NanoFooBar": ["python", "java"],
         },
-        candidate_subsets={"dense": "corpus-ids", "bm25": "corpus-ids"},
+        candidate_subsets={"bm25": "corpus-ids"},
     )
 
 
@@ -84,7 +84,7 @@ def patch_cross_nano_eval(monkeypatch: pytest.MonkeyPatch, fake_datasets_module:
     )
 
 
-def test_cross_encoder_nano_evaluator_auto_expand_with_custom_candidate_subset(
+def test_cross_encoder_nano_evaluator_auto_expand_splits_and_auto_names(
     patch_cross_nano_eval: None,
     dummy_cross_encoder: Any,
 ) -> None:
@@ -92,7 +92,6 @@ def test_cross_encoder_nano_evaluator_auto_expand_with_custom_candidate_subset(
         dataset_names=None,
         dataset_id="example/NanoFooBar",
         write_csv=False,
-        candidate_subset_name="dense",
     )
 
     assert evaluator.dataset_names == ["python", "java"]
@@ -105,19 +104,22 @@ def test_cross_encoder_nano_evaluator_auto_expand_with_custom_candidate_subset(
     assert "NanoFooBar_R100_mean_ndcg@10" in metrics
 
 
-def test_cross_encoder_nano_evaluator_bm25_alias_keeps_backward_compatibility(
+def test_cross_encoder_nano_evaluator_auto_expand_splits_with_mapping_in_strict_mode(
     patch_cross_nano_eval: None,
     dummy_cross_encoder: Any,
 ) -> None:
     evaluator = CrossEncoderNanoEvaluator(
-        dataset_names=["python"],
+        dataset_names=None,
         dataset_id="example/NanoFooBar",
+        dataset_name_to_human_readable={"msmarco": "MSMARCO"},
+        split_prefix="Nano",
+        strict_dataset_name_validation=True,
         write_csv=False,
-        bm25_subset_name="dense",
     )
-    assert evaluator.candidate_subset_name == "dense"
+
+    assert evaluator.dataset_names == ["python", "java"]
     metrics = evaluator(dummy_cross_encoder)
-    assert "NanoFooBar_python_R100_ndcg@10" in metrics
+    assert "NanoFooBar_R100_mean_ndcg@10" in metrics
 
 
 def test_cross_encoder_nano_evaluator_mapping_validates_split_exists(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -154,7 +156,6 @@ def test_cross_encoder_nano_evaluator_accepts_direct_split_names_with_mapping(
         dataset_name_to_human_readable={"msmarco": "MSMARCO"},
         split_prefix="Nano",
         write_csv=False,
-        candidate_subset_name="dense",
     )
 
     assert [sub_evaluator.name for sub_evaluator in evaluator.evaluators] == ["python_R100"]
@@ -170,7 +171,6 @@ def test_cross_encoder_nano_evaluator_custom_name_metric_root(
         dataset_names=["python"],
         dataset_id="example/NanoFooBar",
         write_csv=False,
-        candidate_subset_name="dense",
         name="CustomCrossNano",
     )
 
@@ -180,23 +180,20 @@ def test_cross_encoder_nano_evaluator_custom_name_metric_root(
     assert "CustomCrossNano_R100_mean_ndcg@10" in metrics
 
 
-def test_cross_encoder_nano_evaluator_config_exposes_only_candidate_subset(
+def test_cross_encoder_nano_evaluator_config_keeps_custom_name(
     patch_cross_nano_eval: None,
 ) -> None:
     evaluator = CrossEncoderNanoEvaluator(
         dataset_names=["python"],
         dataset_id="example/NanoFooBar",
         write_csv=False,
-        candidate_subset_name="dense",
+        name="CustomCrossNano",
     )
 
     config = evaluator.get_config_dict()
 
-    assert config["candidate_subset_name"] == "dense"
-    assert "corpus_subset_name" not in config
-    assert "queries_subset_name" not in config
-    assert "qrels_subset_name" not in config
-    assert "retrieved_corpus_ids_column" not in config
+    assert config["name"] == "CustomCrossNano"
+    assert "candidate_subset_name" not in config
 
 
 def test_cross_encoder_nanobeir_invalid_dataset_name() -> None:

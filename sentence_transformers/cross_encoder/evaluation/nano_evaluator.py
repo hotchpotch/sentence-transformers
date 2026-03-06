@@ -35,8 +35,6 @@ class CrossEncoderNanoEvaluator(_GenericCrossEncoderNanoMixin, CrossEncoderNanoB
         split_prefix: str = "",
         strict_dataset_name_validation: bool = False,
         auto_expand_splits_when_dataset_names_none: bool = True,
-        candidate_subset_name: str = "bm25",
-        bm25_subset_name: str | None = None,
         name: str | None = None,
     ) -> None:
         self._initialize_generic_cross_encoder_state(
@@ -45,12 +43,14 @@ class CrossEncoderNanoEvaluator(_GenericCrossEncoderNanoMixin, CrossEncoderNanoB
             split_prefix=split_prefix,
             strict_dataset_name_validation=strict_dataset_name_validation,
             auto_expand_splits_when_dataset_names_none=auto_expand_splits_when_dataset_names_none,
-            candidate_subset_name=candidate_subset_name,
-            bm25_subset_name=bm25_subset_name,
             name=name,
         )
+        dataset_names = self._resolve_dataset_names(dataset_names)
+        self.dataset_names = dataset_names
+        self._validate_dataset_names()
+        self._validate_mapping_splits()
         super().__init__(
-            dataset_names=self._resolve_dataset_names(dataset_names),
+            dataset_names=dataset_names,
             dataset_id=dataset_id,
             rerank_k=rerank_k,
             at_k=at_k,
@@ -76,12 +76,6 @@ class CrossEncoderNanoEvaluator(_GenericCrossEncoderNanoMixin, CrossEncoderNanoB
         if self.dataset_name_to_human_readable is None:
             return f"{self.evaluator_name}_{split_name}_R{self.rerank_k}"
         return f"{split_name}_R{self.rerank_k}"
-
-    def _get_candidate_subset_name(self) -> str:
-        return self.candidate_subset_name
-
-    def _get_retrieved_corpus_ids_column(self) -> str:
-        return "corpus-ids"
 
     def _parse_evaluation_key(self, evaluator_name: str, full_key: str) -> tuple[str, str]:
         prefix = f"{evaluator_name}_"

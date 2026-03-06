@@ -122,6 +122,30 @@ def test_nano_evaluator_auto_expand_splits_and_auto_names(patch_nano_eval: None,
     assert "NanoFooBar_mean_cosine_ndcg@10" in metrics
 
 
+def test_nano_evaluator_auto_expand_splits_with_mapping_in_strict_mode(
+    patch_nano_eval: None,
+    dummy_model: Any,
+) -> None:
+    evaluator = NanoEvaluator(
+        dataset_names=None,
+        dataset_id="example/NanoFooBar",
+        dataset_name_to_human_readable={"msmarco": "MSMARCO"},
+        split_prefix="Nano",
+        strict_dataset_name_validation=True,
+        mrr_at_k=[10],
+        ndcg_at_k=[10],
+        accuracy_at_k=[1],
+        precision_recall_at_k=[1],
+        map_at_k=[100],
+        score_functions={"cosine": lambda a, b: a},
+        write_csv=False,
+    )
+
+    assert evaluator.dataset_names == ["python", "java"]
+    metrics = evaluator(dummy_model)
+    assert "NanoFooBar_mean_cosine_ndcg@10" in metrics
+
+
 def test_nano_evaluator_mapping_validates_split_exists(monkeypatch: pytest.MonkeyPatch) -> None:
     nano_utils_module = importlib.import_module("sentence_transformers.evaluation._nano_utils")
 
@@ -200,6 +224,25 @@ def test_nano_evaluator_custom_name_and_case_insensitive_prompts(
     assert evaluator.evaluators[0].corpus_prompt == "passage: "
     metrics = evaluator(dummy_model)
     assert "CustomNano_mean_cosine_ndcg@10" in metrics
+
+
+def test_nano_evaluator_config_keeps_custom_name(patch_nano_eval: None) -> None:
+    evaluator = NanoEvaluator(
+        dataset_names=["python"],
+        dataset_id="example/NanoFooBar",
+        name="CustomNano",
+        mrr_at_k=[10],
+        ndcg_at_k=[10],
+        accuracy_at_k=[1],
+        precision_recall_at_k=[1],
+        map_at_k=[100],
+        score_functions={"cosine": lambda a, b: a},
+        write_csv=False,
+    )
+
+    config = evaluator.get_config_dict()
+
+    assert config["name"] == "CustomNano"
 
 
 def test_sequential_evaluator_with_nanobeir_and_nanocodesearchnet(

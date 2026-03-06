@@ -21,7 +21,6 @@ model = CrossEncoder(MODEL_NAME)
 evaluator = CrossEncoderNanoBEIREvaluator(
     dataset_id=DATASET_ID,
     dataset_names=DATASET_SPLITS,
-    candidate_subset_name="bm25",
     rerank_k=RERANK_K,
     at_k=10,
     batch_size=32,

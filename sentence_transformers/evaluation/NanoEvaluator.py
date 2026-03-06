@@ -43,9 +43,6 @@ class NanoEvaluator(_GenericNanoDatasetMixin, NanoBEIREvaluator):
         split_prefix: str = "",
         strict_dataset_name_validation: bool = False,
         auto_expand_splits_when_dataset_names_none: bool = True,
-        corpus_subset_name: str = "corpus",
-        queries_subset_name: str = "queries",
-        qrels_subset_name: str = "qrels",
         name: str | None = None,
     ) -> None:
         self._initialize_generic_nano_state(
@@ -54,13 +51,14 @@ class NanoEvaluator(_GenericNanoDatasetMixin, NanoBEIREvaluator):
             split_prefix=split_prefix,
             strict_dataset_name_validation=strict_dataset_name_validation,
             auto_expand_splits_when_dataset_names_none=auto_expand_splits_when_dataset_names_none,
-            corpus_subset_name=corpus_subset_name,
-            queries_subset_name=queries_subset_name,
-            qrels_subset_name=qrels_subset_name,
             name=name,
         )
+        dataset_names = self._resolve_dataset_names(dataset_names)
+        self.dataset_names = dataset_names
+        self._validate_dataset_names()
+        self._validate_mapping_splits()
         super().__init__(
-            dataset_names=self._resolve_dataset_names(dataset_names),
+            dataset_names=dataset_names,
             dataset_id=dataset_id,
             mrr_at_k=mrr_at_k,
             ndcg_at_k=ndcg_at_k,
@@ -98,15 +96,6 @@ class NanoEvaluator(_GenericNanoDatasetMixin, NanoBEIREvaluator):
         if self.truncate_dim is not None:
             human_readable_name += f"_{self.truncate_dim}"
         return human_readable_name
-
-    def _get_corpus_subset_name(self) -> str:
-        return self.corpus_subset_name
-
-    def _get_queries_subset_name(self) -> str:
-        return self.queries_subset_name
-
-    def _get_qrels_subset_name(self) -> str:
-        return self.qrels_subset_name
 
     def _get_prompt_for_dataset(self, prompt_mapping: dict[str, str], dataset_name: str) -> str | None:
         if dataset_name in prompt_mapping:

@@ -259,7 +259,6 @@ class NanoBEIREvaluator(SentenceEvaluator):
 
         self._validate_dataset_names()
         self._validate_prompts()
-        self._validate_mapping_splits()
 
         ir_evaluator_kwargs = {
             "mrr_at_k": mrr_at_k,
@@ -432,21 +431,9 @@ class NanoBEIREvaluator(SentenceEvaluator):
     ) -> InformationRetrievalEvaluator:
         split_name = self._get_split_name(dataset_name)
 
-        corpus = self._load_dataset_subset_split(
-            self._get_corpus_subset_name(),
-            split=split_name,
-            required_columns=["_id", "text"],
-        )
-        queries = self._load_dataset_subset_split(
-            self._get_queries_subset_name(),
-            split=split_name,
-            required_columns=["_id", "text"],
-        )
-        qrels = self._load_dataset_subset_split(
-            self._get_qrels_subset_name(),
-            split=split_name,
-            required_columns=["query-id", "corpus-id"],
-        )
+        corpus = self._load_dataset_subset_split("corpus", split=split_name, required_columns=["_id", "text"])
+        queries = self._load_dataset_subset_split("queries", split=split_name, required_columns=["_id", "text"])
+        qrels = self._load_dataset_subset_split("qrels", split=split_name, required_columns=["query-id", "corpus-id"])
 
         corpus_dict = {sample["_id"]: sample["text"] for sample in corpus if len(sample["text"]) > 0}
         queries_dict = {sample["_id"]: sample["text"] for sample in queries if len(sample["text"]) > 0}
@@ -549,15 +536,6 @@ class NanoBEIREvaluator(SentenceEvaluator):
     def _get_split_name(self, dataset_name: DatasetNameType | str) -> str:
         return f"Nano{DATASET_NAME_TO_HUMAN_READABLE[dataset_name.lower()]}"
 
-    def _get_corpus_subset_name(self) -> str:
-        return "corpus"
-
-    def _get_queries_subset_name(self) -> str:
-        return "queries"
-
-    def _get_qrels_subset_name(self) -> str:
-        return "qrels"
-
     def _get_prompt_for_dataset(
         self, prompt_mapping: dict[str, str], dataset_name: DatasetNameType | str
     ) -> str | None:
@@ -567,9 +545,6 @@ class NanoBEIREvaluator(SentenceEvaluator):
         del evaluator_name
         splits = full_key.split("_", maxsplit=num_underscores_in_name)
         return splits[-1]
-
-    def _validate_mapping_splits(self) -> None:
-        pass
 
     def store_metrics_in_model_card_data(self, *args, **kwargs):
         # Only store metrics in the model card data if there is more than one dataset.

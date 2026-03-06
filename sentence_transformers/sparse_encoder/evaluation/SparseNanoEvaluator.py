@@ -44,9 +44,6 @@ class SparseNanoEvaluator(_GenericNanoDatasetMixin, SparseNanoBEIREvaluator):
         split_prefix: str = "",
         strict_dataset_name_validation: bool = False,
         auto_expand_splits_when_dataset_names_none: bool = True,
-        corpus_subset_name: str = "corpus",
-        queries_subset_name: str = "queries",
-        qrels_subset_name: str = "qrels",
         name: str | None = None,
     ) -> None:
         self._initialize_generic_nano_state(
@@ -55,13 +52,14 @@ class SparseNanoEvaluator(_GenericNanoDatasetMixin, SparseNanoBEIREvaluator):
             split_prefix=split_prefix,
             strict_dataset_name_validation=strict_dataset_name_validation,
             auto_expand_splits_when_dataset_names_none=auto_expand_splits_when_dataset_names_none,
-            corpus_subset_name=corpus_subset_name,
-            queries_subset_name=queries_subset_name,
-            qrels_subset_name=qrels_subset_name,
             name=name,
         )
+        dataset_names = self._resolve_dataset_names(dataset_names)
+        self.dataset_names = dataset_names
+        self._validate_dataset_names()
+        self._validate_mapping_splits()
         super().__init__(
-            dataset_names=self._resolve_dataset_names(dataset_names),
+            dataset_names=dataset_names,
             dataset_id=dataset_id,
             mrr_at_k=mrr_at_k,
             ndcg_at_k=ndcg_at_k,
@@ -90,9 +88,6 @@ class SparseNanoEvaluator(_GenericNanoDatasetMixin, SparseNanoBEIREvaluator):
     _get_evaluator_name_root = NanoEvaluator._get_evaluator_name_root
     _get_evaluation_description = NanoEvaluator._get_evaluation_description
     _get_loading_description = NanoEvaluator._get_loading_description
-    _get_corpus_subset_name = NanoEvaluator._get_corpus_subset_name
-    _get_queries_subset_name = NanoEvaluator._get_queries_subset_name
-    _get_qrels_subset_name = NanoEvaluator._get_qrels_subset_name
     _get_prompt_for_dataset = NanoEvaluator._get_prompt_for_dataset
     _get_metric_from_full_key = NanoEvaluator._get_metric_from_full_key
 

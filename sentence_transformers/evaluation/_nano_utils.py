@@ -15,9 +15,6 @@ class _GenericNanoDatasetMixin:
         split_prefix: str,
         strict_dataset_name_validation: bool,
         auto_expand_splits_when_dataset_names_none: bool,
-        corpus_subset_name: str,
-        queries_subset_name: str,
-        qrels_subset_name: str,
         name: str | None,
     ) -> None:
         self.dataset_id = dataset_id
@@ -27,9 +24,7 @@ class _GenericNanoDatasetMixin:
         self.split_prefix = split_prefix
         self.strict_dataset_name_validation = strict_dataset_name_validation
         self.auto_expand_splits_when_dataset_names_none = auto_expand_splits_when_dataset_names_none
-        self.corpus_subset_name = corpus_subset_name
-        self.queries_subset_name = queries_subset_name
-        self.qrels_subset_name = qrels_subset_name
+        self._configured_name = name
         self.evaluator_name = name or dataset_id.split("/")[-1]
         self._subset_to_split_names_cache: dict[str, list[str]] = {}
 
@@ -38,7 +33,10 @@ class _GenericNanoDatasetMixin:
             return dataset_names
         if not self.auto_expand_splits_when_dataset_names_none:
             raise ValueError("dataset_names cannot be None when auto split expansion is disabled.")
-        return self._get_available_splits(self.queries_subset_name)
+        return self._get_available_splits("queries")
+
+    def _is_known_split_name(self, dataset_name: str) -> bool:
+        return dataset_name in self._get_available_splits("queries")
 
     def _get_split_name(self, dataset_name: str) -> str:
         if self.dataset_name_to_human_readable is None:
@@ -49,6 +47,8 @@ class _GenericNanoDatasetMixin:
         if lowered in self.dataset_name_to_human_readable:
             return f"{self.split_prefix}{self.dataset_name_to_human_readable[lowered]}"
         if not self.strict_dataset_name_validation:
+            return dataset_name
+        if self._is_known_split_name(dataset_name):
             return dataset_name
         raise ValueError(
             f"Dataset '{dataset_name}' does not exist in dataset_name_to_human_readable mapping. "
@@ -63,10 +63,13 @@ class _GenericNanoDatasetMixin:
 
         missing_datasets = []
         for dataset_name in self.dataset_names:
-            try:
-                self._get_split_name(dataset_name)
-            except ValueError:
-                missing_datasets.append(dataset_name)
+            if dataset_name in self.dataset_name_to_human_readable:
+                continue
+            if dataset_name.lower() in self.dataset_name_to_human_readable:
+                continue
+            if self._is_known_split_name(dataset_name):
+                continue
+            missing_datasets.append(dataset_name)
         if missing_datasets:
             raise ValueError(
                 f"Dataset(s) {missing_datasets} do not exist in dataset_name_to_human_readable mapping. "
@@ -74,7 +77,7 @@ class _GenericNanoDatasetMixin:
             )
 
     def _get_required_subset_names_for_split_validation(self) -> list[str]:
-        return [self.corpus_subset_name, self.queries_subset_name, self.qrels_subset_name]
+        return ["corpus", "queries", "qrels"]
 
     def _validate_mapping_splits(self) -> None:
         if self.dataset_name_to_human_readable is None:
@@ -119,10 +122,9 @@ class _GenericNanoDatasetMixin:
             "split_prefix": self.split_prefix,
             "strict_dataset_name_validation": self.strict_dataset_name_validation,
             "auto_expand_splits_when_dataset_names_none": self.auto_expand_splits_when_dataset_names_none,
-            "corpus_subset_name": self.corpus_subset_name,
-            "queries_subset_name": self.queries_subset_name,
-            "qrels_subset_name": self.qrels_subset_name,
         }
+        if self._configured_name is not None:
+            config_dict["name"] = self._configured_name
         for key in ["truncate_dim", "query_prompts", "corpus_prompts"]:
             value = getattr(self, key, None)
             if value is not None:
@@ -139,8 +141,6 @@ class _GenericCrossEncoderNanoMixin(_GenericNanoDatasetMixin):
         split_prefix: str,
         strict_dataset_name_validation: bool,
         auto_expand_splits_when_dataset_names_none: bool,
-        candidate_subset_name: str,
-        bm25_subset_name: str | None,
         name: str | None,
     ) -> None:
         self._initialize_generic_nano_state(
@@ -149,23 +149,11 @@ class _GenericCrossEncoderNanoMixin(_GenericNanoDatasetMixin):
             split_prefix=split_prefix,
             strict_dataset_name_validation=strict_dataset_name_validation,
             auto_expand_splits_when_dataset_names_none=auto_expand_splits_when_dataset_names_none,
-            corpus_subset_name="corpus",
-            queries_subset_name="queries",
-            qrels_subset_name="qrels",
             name=name,
         )
-        if bm25_subset_name is not None:
-            if candidate_subset_name != "bm25" and bm25_subset_name != candidate_subset_name:
-                raise ValueError(
-                    "Received both candidate_subset_name and bm25_subset_name with different values. "
-                    "Please pass only candidate_subset_name."
-                )
-            candidate_subset_name = bm25_subset_name
-        self.candidate_subset_name = candidate_subset_name
-        self.bm25_subset_name = bm25_subset_name
 
     def _get_required_subset_names_for_split_validation(self) -> list[str]:
-        return [*super()._get_required_subset_names_for_split_validation(), self.candidate_subset_name]
+        return [*super()._get_required_subset_names_for_split_validation(), "bm25"]
 
     def _validate_retrieval_references(
         self,
@@ -241,8 +229,7 @@ class _GenericCrossEncoderNanoMixin(_GenericNanoDatasetMixin):
             "split_prefix": self.split_prefix,
             "strict_dataset_name_validation": self.strict_dataset_name_validation,
             "auto_expand_splits_when_dataset_names_none": self.auto_expand_splits_when_dataset_names_none,
-            "candidate_subset_name": self.candidate_subset_name,
         }
-        if self.bm25_subset_name is not None:
-            config_dict["bm25_subset_name"] = self.candidate_subset_name
+        if self._configured_name is not None:
+            config_dict["name"] = self._configured_name
         return config_dict

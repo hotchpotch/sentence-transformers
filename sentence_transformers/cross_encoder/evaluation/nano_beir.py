@@ -224,7 +224,6 @@ class CrossEncoderNanoBEIREvaluator(SentenceEvaluator):
         self.name = f"{self._get_evaluator_name_root()}_R{rerank_k:d}_{self.aggregate_key}"
 
         self._validate_dataset_names()
-        self._validate_mapping_splits()
 
         reranking_kwargs = {
             "at_k": self.at_k,
@@ -331,25 +330,13 @@ class CrossEncoderNanoBEIREvaluator(SentenceEvaluator):
     ) -> CrossEncoderRerankingEvaluator:
         split_name = self._get_split_name(dataset_name)
 
-        corpus = self._load_dataset_subset_split(
-            self._get_corpus_subset_name(),
-            split=split_name,
-            required_columns=["_id", "text"],
-        )
-        queries = self._load_dataset_subset_split(
-            self._get_queries_subset_name(),
-            split=split_name,
-            required_columns=["_id", "text"],
-        )
-        qrels = self._load_dataset_subset_split(
-            self._get_qrels_subset_name(),
-            split=split_name,
-            required_columns=["query-id", "corpus-id"],
-        )
+        corpus = self._load_dataset_subset_split("corpus", split=split_name, required_columns=["_id", "text"])
+        queries = self._load_dataset_subset_split("queries", split=split_name, required_columns=["_id", "text"])
+        qrels = self._load_dataset_subset_split("qrels", split=split_name, required_columns=["query-id", "corpus-id"])
         bm25 = self._load_dataset_subset_split(
-            self._get_candidate_subset_name(),
+            "bm25",
             split=split_name,
-            required_columns=["query-id", self._get_retrieved_corpus_ids_column()],
+            required_columns=["query-id", "corpus-ids"],
         )
 
         corpus_mapping = dict(zip(corpus["_id"], corpus["text"]))
@@ -374,11 +361,10 @@ class CrossEncoderNanoBEIREvaluator(SentenceEvaluator):
             query_mapping: dict[str, str],
             qrels_mapping: dict[str, set[str]],
             rerank_k: int,
-            retrieved_corpus_ids_column: str,
         ):
             query = query_mapping[sample["query-id"]]
             positives = [corpus_mapping[positive_id] for positive_id in qrels_mapping[sample["query-id"]]]
-            documents = [corpus_mapping[document_id] for document_id in sample[retrieved_corpus_ids_column][:rerank_k]]
+            documents = [corpus_mapping[document_id] for document_id in sample["corpus-ids"][:rerank_k]]
             return {
                 "query": query,
                 "positive": positives,
@@ -392,7 +378,6 @@ class CrossEncoderNanoBEIREvaluator(SentenceEvaluator):
                 "query_mapping": query_mapping,
                 "qrels_mapping": qrels_mapping,
                 "rerank_k": self.rerank_k,
-                "retrieved_corpus_ids_column": self._get_retrieved_corpus_ids_column(),
             },
         )
 
@@ -453,28 +438,10 @@ class CrossEncoderNanoBEIREvaluator(SentenceEvaluator):
     def _get_split_name(self, dataset_name: DatasetNameType | str) -> str:
         return f"Nano{DATASET_NAME_TO_HUMAN_READABLE[dataset_name.lower()]}"
 
-    def _get_corpus_subset_name(self) -> str:
-        return "corpus"
-
-    def _get_queries_subset_name(self) -> str:
-        return "queries"
-
-    def _get_qrels_subset_name(self) -> str:
-        return "qrels"
-
-    def _get_candidate_subset_name(self) -> str:
-        return "bm25"
-
-    def _get_retrieved_corpus_ids_column(self) -> str:
-        return "corpus-ids"
-
     def _parse_evaluation_key(self, evaluator_name: str, full_key: str) -> tuple[str, str]:
         del evaluator_name
         _dataset, _rerank_k, metric = full_key.split("_", maxsplit=2)
         return full_key, metric
-
-    def _validate_mapping_splits(self) -> None:
-        pass
 
     def _validate_retrieval_references(
         self,
