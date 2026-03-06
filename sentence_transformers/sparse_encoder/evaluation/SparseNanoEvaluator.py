@@ -58,6 +58,8 @@ class SparseNanoEvaluator(_GenericNanoDatasetMixin, SparseNanoBEIREvaluator):
         self.dataset_names = dataset_names
         self._validate_dataset_names()
         self._validate_mapping_splits()
+        query_prompts = self._normalize_prompt_mapping(query_prompts, dataset_names)
+        corpus_prompts = self._normalize_prompt_mapping(corpus_prompts, dataset_names)
         super().__init__(
             dataset_names=dataset_names,
             dataset_id=dataset_id,
@@ -85,10 +87,7 @@ class SparseNanoEvaluator(_GenericNanoDatasetMixin, SparseNanoBEIREvaluator):
             human_readable_name += f"_{self.max_active_dims}"
         return human_readable_name
 
-    _get_evaluator_name_root = NanoEvaluator._get_evaluator_name_root
-    _get_evaluation_description = NanoEvaluator._get_evaluation_description
-    _get_loading_description = NanoEvaluator._get_loading_description
-    _get_prompt_for_dataset = NanoEvaluator._get_prompt_for_dataset
+    description = NanoEvaluator.description
     _get_metric_from_full_key = NanoEvaluator._get_metric_from_full_key
 
     def get_config_dict(self) -> dict[str, Any]:

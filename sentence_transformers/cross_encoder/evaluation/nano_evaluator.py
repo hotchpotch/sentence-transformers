@@ -62,14 +62,9 @@ class CrossEncoderNanoEvaluator(_GenericCrossEncoderNanoMixin, CrossEncoderNanoB
             aggregate_key=aggregate_key,
         )
 
-    def _get_evaluator_name_root(self) -> str:
+    @property
+    def description(self) -> str:
         return self.evaluator_name
-
-    def _get_evaluation_description(self) -> str:
-        return "Nano"
-
-    def _get_loading_description(self) -> str:
-        return "Loading Nano datasets"
 
     def _get_human_readable_name(self, dataset_name: str) -> str:
         split_name = self._get_split_name(dataset_name)

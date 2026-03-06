@@ -233,7 +233,7 @@ class NanoBEIREvaluator(SentenceEvaluator):
     ):
         super().__init__()
         if dataset_names is None:
-            dataset_names = self._get_default_dataset_names()
+            dataset_names = list(DATASET_NAME_TO_HUMAN_READABLE.keys())
         self.dataset_names = dataset_names
         self.dataset_id = dataset_id
         self.aggregate_fn = aggregate_fn
@@ -247,7 +247,7 @@ class NanoBEIREvaluator(SentenceEvaluator):
         self.score_function_names = sorted(list(self.score_functions.keys())) if score_functions else []
         self.main_score_function = main_score_function
         self.truncate_dim = truncate_dim
-        self.name = f"{self._get_evaluator_name_root()}_{aggregate_key}"
+        self.name = f"{self.description}_{aggregate_key}"
         if self.truncate_dim:
             self.name += f"_{self.truncate_dim}"
 
@@ -276,10 +276,10 @@ class NanoBEIREvaluator(SentenceEvaluator):
         }
         self.evaluators = [
             self._load_dataset(name, **ir_evaluator_kwargs)
-            for name in tqdm(self.dataset_names, desc=self._get_loading_description(), leave=False)
+            for name in tqdm(self.dataset_names, desc=f"Loading {self.description} datasets", leave=False)
         ]
 
-        self.csv_file: str = f"{self._get_evaluator_name_root()}_evaluation_{aggregate_key}_results.csv"
+        self.csv_file: str = f"{self.description}_evaluation_{aggregate_key}_results.csv"
         self.csv_headers = ["epoch", "steps"]
 
         self._append_csv_headers(self.score_function_names)
@@ -322,9 +322,7 @@ class NanoBEIREvaluator(SentenceEvaluator):
             out_txt = ""
         if self.truncate_dim is not None:
             out_txt += f" (truncated to {self.truncate_dim})"
-        logger.info(
-            f"{self._get_evaluation_description()} Evaluation of the model on {self.dataset_names} dataset{out_txt}:"
-        )
+        logger.info(f"{self.description} Evaluation of the model on {self.dataset_names} dataset{out_txt}:")
 
         if self.score_functions is None:
             self.score_functions = {model.similarity_fn_name: model.similarity}
@@ -450,9 +448,9 @@ class NanoBEIREvaluator(SentenceEvaluator):
                 qrels_dict[sample["query-id"]].add(corpus_ids)
 
         if self.query_prompts is not None:
-            ir_evaluator_kwargs["query_prompt"] = self._get_prompt_for_dataset(self.query_prompts, dataset_name)
+            ir_evaluator_kwargs["query_prompt"] = self.query_prompts.get(dataset_name, None)
         if self.corpus_prompts is not None:
-            ir_evaluator_kwargs["corpus_prompt"] = self._get_prompt_for_dataset(self.corpus_prompts, dataset_name)
+            ir_evaluator_kwargs["corpus_prompt"] = self.corpus_prompts.get(dataset_name, None)
         human_readable_name = self._get_human_readable_name(dataset_name)
         return self.information_retrieval_class(
             queries=queries_dict,
@@ -461,6 +459,10 @@ class NanoBEIREvaluator(SentenceEvaluator):
             name=human_readable_name,
             **ir_evaluator_kwargs,
         )
+
+    @property
+    def description(self) -> str:
+        return "NanoBEIR"
 
     def _load_dataset_subset_split(self, subset: str, split: str, required_columns: list[str]):
         if not is_datasets_available():
@@ -502,9 +504,7 @@ class NanoBEIREvaluator(SentenceEvaluator):
             if isinstance(self.query_prompts, str):
                 self.query_prompts = {dataset_name: self.query_prompts for dataset_name in self.dataset_names}
             elif missing_query_prompts := [
-                dataset_name
-                for dataset_name in self.dataset_names
-                if self._get_prompt_for_dataset(self.query_prompts, dataset_name) is None
+                dataset_name for dataset_name in self.dataset_names if dataset_name not in self.query_prompts
             ]:
                 error_msg += f"The following datasets are missing query prompts: {missing_query_prompts}\n"
 
@@ -512,34 +512,15 @@ class NanoBEIREvaluator(SentenceEvaluator):
             if isinstance(self.corpus_prompts, str):
                 self.corpus_prompts = {dataset_name: self.corpus_prompts for dataset_name in self.dataset_names}
             elif missing_corpus_prompts := [
-                dataset_name
-                for dataset_name in self.dataset_names
-                if self._get_prompt_for_dataset(self.corpus_prompts, dataset_name) is None
+                dataset_name for dataset_name in self.dataset_names if dataset_name not in self.corpus_prompts
             ]:
                 error_msg += f"The following datasets are missing corpus prompts: {missing_corpus_prompts}\n"
 
         if error_msg:
             raise ValueError(error_msg.strip())
 
-    def _get_default_dataset_names(self) -> list[str]:
-        return list(DATASET_NAME_TO_HUMAN_READABLE.keys())
-
-    def _get_evaluator_name_root(self) -> str:
-        return "NanoBEIR"
-
-    def _get_evaluation_description(self) -> str:
-        return "NanoBEIR"
-
-    def _get_loading_description(self) -> str:
-        return "Loading NanoBEIR datasets"
-
     def _get_split_name(self, dataset_name: DatasetNameType | str) -> str:
         return f"Nano{DATASET_NAME_TO_HUMAN_READABLE[dataset_name.lower()]}"
-
-    def _get_prompt_for_dataset(
-        self, prompt_mapping: dict[str, str], dataset_name: DatasetNameType | str
-    ) -> str | None:
-        return prompt_mapping.get(dataset_name, None)
 
     def _get_metric_from_full_key(self, evaluator_name: str, full_key: str, num_underscores_in_name: int) -> str:
         del evaluator_name

@@ -209,7 +209,7 @@ class CrossEncoderNanoBEIREvaluator(SentenceEvaluator):
     ):
         super().__init__()
         if dataset_names is None:
-            dataset_names = self._get_default_dataset_names()
+            dataset_names = [key for key in DATASET_NAME_TO_HUMAN_READABLE if key not in ["arguana", "touche2020"]]
         self.dataset_names = dataset_names
         self.dataset_id = dataset_id
         self.rerank_k = rerank_k
@@ -221,7 +221,7 @@ class CrossEncoderNanoBEIREvaluator(SentenceEvaluator):
         self.aggregate_fn = aggregate_fn
         self.aggregate_key = aggregate_key
 
-        self.name = f"{self._get_evaluator_name_root()}_R{rerank_k:d}_{self.aggregate_key}"
+        self.name = f"{self.description}_R{rerank_k:d}_{self.aggregate_key}"
 
         self._validate_dataset_names()
 
@@ -235,10 +235,10 @@ class CrossEncoderNanoBEIREvaluator(SentenceEvaluator):
 
         self.evaluators = [
             self._load_dataset(name, **reranking_kwargs)
-            for name in tqdm(self.dataset_names, desc=self._get_loading_description(), leave=False)
+            for name in tqdm(self.dataset_names, desc=f"Loading {self.description} datasets", leave=False)
         ]
 
-        self.csv_file: str = f"{self._get_evaluator_name_root()}_evaluation_{aggregate_key}_results.csv"
+        self.csv_file: str = f"{self.description}_evaluation_{aggregate_key}_results.csv"
         self.csv_headers = ["epoch", "steps", "MAP", f"MRR@{self.at_k}", f"NDCG@{self.at_k}"]
 
         self.primary_metric = f"ndcg@{self.at_k}"
@@ -255,9 +255,7 @@ class CrossEncoderNanoBEIREvaluator(SentenceEvaluator):
                 out_txt = f" in epoch {epoch} after {steps} steps"
         else:
             out_txt = ""
-        logger.info(
-            f"{self._get_evaluation_description()} Evaluation of the model on {self.dataset_names} dataset{out_txt}:"
-        )
+        logger.info(f"{self.description} Evaluation of the model on {self.dataset_names} dataset{out_txt}:")
 
         for evaluator in tqdm(self.evaluators, desc="Evaluating datasets", disable=not self.show_progress_bar):
             logger.info(f"Evaluating {evaluator.name}")
@@ -388,6 +386,10 @@ class CrossEncoderNanoBEIREvaluator(SentenceEvaluator):
             **ir_evaluator_kwargs,
         )
 
+    @property
+    def description(self) -> str:
+        return "NanoBEIR"
+
     def _load_dataset_subset_split(self, subset: str, split: str, required_columns: list[str]):
         if not is_datasets_available():
             raise ValueError(
@@ -421,19 +423,6 @@ class CrossEncoderNanoBEIREvaluator(SentenceEvaluator):
                 f"Dataset(s) {missing_datasets} are not valid NanoBEIR datasets. "
                 f"Valid dataset names are: {list(DATASET_NAME_TO_HUMAN_READABLE.keys())}"
             )
-
-    def _get_default_dataset_names(self) -> list[str]:
-        # We exclude arguana and touche2020 because their Argument Retrieval meaningfully task differs from the others
-        return [key for key in DATASET_NAME_TO_HUMAN_READABLE if key not in ["arguana", "touche2020"]]
-
-    def _get_evaluator_name_root(self) -> str:
-        return "NanoBEIR"
-
-    def _get_evaluation_description(self) -> str:
-        return "NanoBEIR"
-
-    def _get_loading_description(self) -> str:
-        return "Loading NanoBEIR datasets"
 
     def _get_split_name(self, dataset_name: DatasetNameType | str) -> str:
         return f"Nano{DATASET_NAME_TO_HUMAN_READABLE[dataset_name.lower()]}"

@@ -57,6 +57,8 @@ class NanoEvaluator(_GenericNanoDatasetMixin, NanoBEIREvaluator):
         self.dataset_names = dataset_names
         self._validate_dataset_names()
         self._validate_mapping_splits()
+        query_prompts = self._normalize_prompt_mapping(query_prompts, dataset_names)
+        corpus_prompts = self._normalize_prompt_mapping(corpus_prompts, dataset_names)
         super().__init__(
             dataset_names=dataset_names,
             dataset_id=dataset_id,
@@ -78,14 +80,9 @@ class NanoEvaluator(_GenericNanoDatasetMixin, NanoBEIREvaluator):
             write_predictions=write_predictions,
         )
 
-    def _get_evaluator_name_root(self) -> str:
+    @property
+    def description(self) -> str:
         return self.evaluator_name
-
-    def _get_evaluation_description(self) -> str:
-        return "Nano"
-
-    def _get_loading_description(self) -> str:
-        return "Loading Nano datasets"
 
     def _get_human_readable_name(self, dataset_name: str) -> str:
         split_name = self._get_split_name(dataset_name)
@@ -96,12 +93,6 @@ class NanoEvaluator(_GenericNanoDatasetMixin, NanoBEIREvaluator):
         if self.truncate_dim is not None:
             human_readable_name += f"_{self.truncate_dim}"
         return human_readable_name
-
-    def _get_prompt_for_dataset(self, prompt_mapping: dict[str, str], dataset_name: str) -> str | None:
-        if dataset_name in prompt_mapping:
-            return prompt_mapping[dataset_name]
-        lower_to_prompt = {key.lower(): value for key, value in prompt_mapping.items()}
-        return lower_to_prompt.get(dataset_name.lower())
 
     def _get_metric_from_full_key(self, evaluator_name: str, full_key: str, num_underscores_in_name: int) -> str:
         prefix = f"{evaluator_name}_"

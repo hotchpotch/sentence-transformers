@@ -35,6 +35,24 @@ class _GenericNanoDatasetMixin:
             raise ValueError("dataset_names cannot be None when auto split expansion is disabled.")
         return self._get_available_splits("queries")
 
+    def _normalize_prompt_mapping(
+        self,
+        prompt_mapping: str | dict[str, str] | None,
+        dataset_names: list[str],
+    ) -> str | dict[str, str] | None:
+        if prompt_mapping is None or isinstance(prompt_mapping, str):
+            return prompt_mapping
+
+        lower_to_prompt = {key.lower(): value for key, value in prompt_mapping.items()}
+        normalized_prompt_mapping = {}
+        for dataset_name in dataset_names:
+            prompt = prompt_mapping.get(dataset_name)
+            if prompt is None:
+                prompt = lower_to_prompt.get(dataset_name.lower())
+            if prompt is not None:
+                normalized_prompt_mapping[dataset_name] = prompt
+        return normalized_prompt_mapping
+
     def _is_known_split_name(self, dataset_name: str) -> bool:
         return dataset_name in self._get_available_splits("queries")
 
