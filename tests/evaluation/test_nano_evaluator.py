@@ -133,11 +133,14 @@ def fake_datasets_module() -> Any:
 
 @pytest.fixture
 def patch_nano_eval(monkeypatch: pytest.MonkeyPatch, fake_datasets_module: Any) -> None:
-    nano_module = importlib.import_module("sentence_transformers.evaluation.NanoEvaluator")
+    nanobeir_module = importlib.import_module("sentence_transformers.evaluation.NanoBEIREvaluator")
+    nano_utils_module = importlib.import_module("sentence_transformers.evaluation._nano_utils")
 
-    monkeypatch.setattr(nano_module, "is_datasets_available", lambda: True)
+    monkeypatch.setattr(nanobeir_module, "is_datasets_available", lambda: True)
+    monkeypatch.setattr(nano_utils_module, "is_datasets_available", lambda: True)
     monkeypatch.setitem(sys.modules, "datasets", fake_datasets_module)
     monkeypatch.setattr(NanoEvaluator, "information_retrieval_class", FakeInformationRetrievalEvaluator)
+    monkeypatch.setattr(NanoBEIREvaluator, "information_retrieval_class", FakeInformationRetrievalEvaluator)
 
 
 def test_nano_evaluator_auto_expand_splits_and_auto_names(patch_nano_eval: None, dummy_model: Any) -> None:
@@ -165,13 +168,13 @@ def test_nano_evaluator_auto_expand_splits_and_auto_names(patch_nano_eval: None,
 
 
 def test_nano_evaluator_mapping_validates_split_exists(monkeypatch: pytest.MonkeyPatch) -> None:
-    nano_module = importlib.import_module("sentence_transformers.evaluation.NanoEvaluator")
+    nano_utils_module = importlib.import_module("sentence_transformers.evaluation._nano_utils")
 
     def get_dataset_split_names(dataset_id: str, subset: str) -> list[str]:
         del dataset_id, subset
         return ["NanoNQ"]
 
-    monkeypatch.setattr(nano_module, "is_datasets_available", lambda: True)
+    monkeypatch.setattr(nano_utils_module, "is_datasets_available", lambda: True)
     monkeypatch.setitem(
         sys.modules,
         "datasets",

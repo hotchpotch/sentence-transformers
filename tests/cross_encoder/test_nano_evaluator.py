@@ -116,13 +116,25 @@ def fake_datasets_module() -> Any:
 
 @pytest.fixture
 def patch_cross_nano_eval(monkeypatch: pytest.MonkeyPatch, fake_datasets_module: Any) -> None:
-    import sentence_transformers.cross_encoder.evaluation.nano_evaluator as cross_nano_module
+    import sentence_transformers.cross_encoder.evaluation.nano_beir as cross_nanobeir_module
+    import sentence_transformers.evaluation._nano_utils as nano_utils_module
 
-    monkeypatch.setattr(cross_nano_module, "is_datasets_available", lambda: True)
+    monkeypatch.setattr(nano_utils_module, "is_datasets_available", lambda: True)
+    monkeypatch.setattr(cross_nanobeir_module, "is_datasets_available", lambda: True)
     monkeypatch.setitem(sys.modules, "datasets", fake_datasets_module)
     monkeypatch.setattr(
         CrossEncoderNanoEvaluator,
         "reranking_evaluator_class",
+        FakeCrossEncoderRerankingEvaluator,
+    )
+    monkeypatch.setattr(
+        CrossEncoderNanoBEIREvaluator,
+        "reranking_evaluator_class",
+        FakeCrossEncoderRerankingEvaluator,
+    )
+    monkeypatch.setattr(
+        cross_nanobeir_module,
+        "CrossEncoderRerankingEvaluator",
         FakeCrossEncoderRerankingEvaluator,
     )
 
@@ -166,13 +178,13 @@ def test_cross_encoder_nano_evaluator_bm25_alias_keeps_backward_compatibility(
 
 
 def test_cross_encoder_nano_evaluator_mapping_validates_split_exists(monkeypatch: pytest.MonkeyPatch) -> None:
-    import sentence_transformers.cross_encoder.evaluation.nano_evaluator as cross_nano_module
+    import sentence_transformers.evaluation._nano_utils as nano_utils_module
 
     def get_dataset_split_names(dataset_id: str, subset: str) -> list[str]:
         del dataset_id, subset
         return ["NanoNQ"]
 
-    monkeypatch.setattr(cross_nano_module, "is_datasets_available", lambda: True)
+    monkeypatch.setattr(nano_utils_module, "is_datasets_available", lambda: True)
     monkeypatch.setitem(
         sys.modules,
         "datasets",
