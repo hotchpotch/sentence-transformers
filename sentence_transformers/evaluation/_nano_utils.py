@@ -57,6 +57,8 @@ class _GenericNanoDatasetMixin:
         lowered = dataset_name.lower()
         if lowered in self.dataset_name_to_human_readable:
             return f"{self.split_prefix}{self.dataset_name_to_human_readable[lowered]}"
+        if not self.strict_dataset_name_validation:
+            return dataset_name
         raise ValueError(
             f"Dataset '{dataset_name}' does not exist in dataset_name_to_human_readable mapping. "
             f"Available dataset names are: {list(self.dataset_name_to_human_readable.keys())}"

@@ -144,6 +144,24 @@ def test_cross_encoder_nano_evaluator_mapping_validates_split_exists(monkeypatch
         )
 
 
+def test_cross_encoder_nano_evaluator_accepts_direct_split_names_with_mapping(
+    patch_cross_nano_eval: None,
+    dummy_cross_encoder: Any,
+) -> None:
+    evaluator = CrossEncoderNanoEvaluator(
+        dataset_names=["python"],
+        dataset_id="example/NanoFooBar",
+        dataset_name_to_human_readable={"msmarco": "MSMARCO"},
+        split_prefix="Nano",
+        write_csv=False,
+        candidate_subset_name="dense",
+    )
+
+    assert [sub_evaluator.name for sub_evaluator in evaluator.evaluators] == ["python_R100"]
+    metrics = evaluator(dummy_cross_encoder)
+    assert "NanoFooBar_R100_mean_ndcg@10" in metrics
+
+
 def test_cross_encoder_nanobeir_invalid_dataset_name() -> None:
     with pytest.raises(ValueError, match="are not valid NanoBEIR datasets"):
         CrossEncoderNanoBEIREvaluator(dataset_names=["invalidDataset"])

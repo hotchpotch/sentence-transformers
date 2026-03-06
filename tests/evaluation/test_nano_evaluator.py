@@ -150,6 +150,29 @@ def test_nano_evaluator_mapping_validates_split_exists(monkeypatch: pytest.Monke
         )
 
 
+def test_nano_evaluator_accepts_direct_split_names_with_mapping(
+    patch_nano_eval: None,
+    dummy_model: Any,
+) -> None:
+    evaluator = NanoEvaluator(
+        dataset_names=["python"],
+        dataset_id="example/NanoFooBar",
+        dataset_name_to_human_readable={"msmarco": "MSMARCO"},
+        split_prefix="Nano",
+        mrr_at_k=[10],
+        ndcg_at_k=[10],
+        accuracy_at_k=[1],
+        precision_recall_at_k=[1],
+        map_at_k=[100],
+        score_functions={"cosine": lambda a, b: a},
+        write_csv=False,
+    )
+
+    assert [sub_evaluator.name for sub_evaluator in evaluator.evaluators] == ["python"]
+    metrics = evaluator(dummy_model)
+    assert "NanoFooBar_mean_cosine_ndcg@10" in metrics
+
+
 def test_sequential_evaluator_with_nanobeir_and_nanocodesearchnet(
     patch_nano_eval: None,
     dummy_model: Any,
