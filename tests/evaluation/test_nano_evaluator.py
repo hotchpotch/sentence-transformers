@@ -81,7 +81,7 @@ def fake_datasets_module() -> Any:
     return build_fake_datasets_module(
         {
             "sentence-transformers/NanoBEIR-en": ["NanoMSMARCO", "NanoNQ"],
-            "example/FooBar": ["python", "java"],
+            "example/FooBar": ["ds_foo", "ds_bar"],
         }
     )
 
@@ -105,10 +105,10 @@ def test_nano_evaluator_auto_expand_splits_and_auto_names(patch_nano_eval: None,
         write_csv=False,
     )
 
-    assert evaluator.dataset_names == ["python", "java"]
+    assert evaluator.dataset_names == ["ds_foo", "ds_bar"]
     assert [sub_evaluator.name for sub_evaluator in evaluator.evaluators] == [
-        "FooBar_python",
-        "FooBar_java",
+        "FooBar_ds_foo",
+        "FooBar_ds_bar",
     ]
 
     metrics = evaluator(dummy_model)
@@ -129,7 +129,7 @@ def test_nano_evaluator_auto_expand_splits_with_mapping_in_strict_mode(
         write_csv=False,
     )
 
-    assert evaluator.dataset_names == ["python", "java"]
+    assert evaluator.dataset_names == ["ds_foo", "ds_bar"]
     metrics = evaluator(dummy_model)
     assert "FooBar_mean_cosine_ndcg@10" in metrics
 
@@ -163,14 +163,14 @@ def test_nano_evaluator_accepts_direct_split_names_with_mapping(
     dummy_model: Any,
 ) -> None:
     evaluator = NanoEvaluator(
-        dataset_names=["python"],
+        dataset_names=["ds_foo"],
         dataset_id="example/FooBar",
         dataset_name_to_human_readable={"msmarco": "MSMARCO"},
         split_prefix="Nano",
         write_csv=False,
     )
 
-    assert [sub_evaluator.name for sub_evaluator in evaluator.evaluators] == ["python"]
+    assert [sub_evaluator.name for sub_evaluator in evaluator.evaluators] == ["ds_foo"]
     metrics = evaluator(dummy_model)
     assert "FooBar_mean_cosine_ndcg@10" in metrics
 
@@ -180,16 +180,16 @@ def test_nano_evaluator_custom_name_and_case_insensitive_prompts(
     dummy_model: Any,
 ) -> None:
     evaluator = NanoEvaluator(
-        dataset_names=["python"],
+        dataset_names=["ds_foo"],
         dataset_id="example/FooBar",
-        query_prompts={"PYTHON": "query: "},
-        corpus_prompts={"PYTHON": "passage: "},
+        query_prompts={"DS_FOO": "query: "},
+        corpus_prompts={"DS_FOO": "passage: "},
         name="CustomNano",
         write_csv=False,
     )
 
     assert evaluator.name == "CustomNano_mean"
-    assert [sub_evaluator.name for sub_evaluator in evaluator.evaluators] == ["CustomNano_python"]
+    assert [sub_evaluator.name for sub_evaluator in evaluator.evaluators] == ["CustomNano_ds_foo"]
     assert evaluator.evaluators[0].query_prompt == "query: "
     assert evaluator.evaluators[0].corpus_prompt == "passage: "
     metrics = evaluator(dummy_model)
@@ -198,7 +198,7 @@ def test_nano_evaluator_custom_name_and_case_insensitive_prompts(
 
 def test_nano_evaluator_config_keeps_custom_name(patch_nano_eval: None) -> None:
     evaluator = NanoEvaluator(
-        dataset_names=["python"],
+        dataset_names=["ds_foo"],
         dataset_id="example/FooBar",
         name="CustomNano",
         write_csv=False,
@@ -218,7 +218,7 @@ def test_sequential_evaluator_with_nanobeir_and_generic_nano_dataset(
         write_csv=False,
     )
     generic_nano_evaluator = NanoEvaluator(
-        dataset_names=["python"],
+        dataset_names=["ds_foo"],
         dataset_id="example/FooBar",
         write_csv=False,
     )

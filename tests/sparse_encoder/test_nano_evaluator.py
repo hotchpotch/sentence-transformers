@@ -94,7 +94,7 @@ def fake_datasets_module() -> Any:
     return build_fake_datasets_module(
         {
             "sentence-transformers/NanoBEIR-en": ["NanoMSMARCO", "NanoNQ"],
-            "example/FooBar": ["python", "java"],
+            "example/FooBar": ["ds_foo", "ds_bar"],
         }
     )
 
@@ -125,10 +125,10 @@ def test_sparse_nano_evaluator_auto_expand_splits_and_auto_names(
         write_csv=False,
     )
 
-    assert evaluator.dataset_names == ["python", "java"]
+    assert evaluator.dataset_names == ["ds_foo", "ds_bar"]
     assert [sub_evaluator.name for sub_evaluator in evaluator.evaluators] == [
-        "FooBar_python",
-        "FooBar_java",
+        "FooBar_ds_foo",
+        "FooBar_ds_bar",
     ]
 
     metrics = evaluator(dummy_sparse_model)
@@ -143,14 +143,14 @@ def test_sparse_nano_evaluator_single_split_path(
     dummy_sparse_model: Any,
 ) -> None:
     evaluator = SparseNanoEvaluator(
-        dataset_names=["python"],
+        dataset_names=["ds_foo"],
         dataset_id="example/FooBar",
         write_csv=False,
     )
 
     metrics = evaluator(dummy_sparse_model)
     assert evaluator.primary_metric == "FooBar_mean_dot_ndcg@10"
-    assert "FooBar_python_dot_ndcg@10" in metrics
+    assert "FooBar_ds_foo_dot_ndcg@10" in metrics
     assert "FooBar_mean_avg_flops" in metrics
 
 
@@ -183,14 +183,14 @@ def test_sparse_nano_evaluator_accepts_direct_split_names_with_mapping(
     dummy_sparse_model: Any,
 ) -> None:
     evaluator = SparseNanoEvaluator(
-        dataset_names=["python"],
+        dataset_names=["ds_foo"],
         dataset_id="example/FooBar",
         dataset_name_to_human_readable={"msmarco": "MSMARCO"},
         split_prefix="Nano",
         write_csv=False,
     )
 
-    assert [sub_evaluator.name for sub_evaluator in evaluator.evaluators] == ["python"]
+    assert [sub_evaluator.name for sub_evaluator in evaluator.evaluators] == ["ds_foo"]
     metrics = evaluator(dummy_sparse_model)
     assert "FooBar_mean_dot_ndcg@10" in metrics
 
@@ -200,14 +200,14 @@ def test_sparse_nano_evaluator_custom_name_metric_root(
     dummy_sparse_model: Any,
 ) -> None:
     evaluator = SparseNanoEvaluator(
-        dataset_names=["python"],
+        dataset_names=["ds_foo"],
         dataset_id="example/FooBar",
         name="CustomSparseNano",
         write_csv=False,
     )
 
     assert evaluator.name == "CustomSparseNano_mean"
-    assert [sub_evaluator.name for sub_evaluator in evaluator.evaluators] == ["CustomSparseNano_python"]
+    assert [sub_evaluator.name for sub_evaluator in evaluator.evaluators] == ["CustomSparseNano_ds_foo"]
     metrics = evaluator(dummy_sparse_model)
     assert "CustomSparseNano_mean_dot_ndcg@10" in metrics
 
@@ -221,7 +221,7 @@ def test_sequential_evaluator_with_sparse_nanobeir_and_generic_nano_dataset(
         write_csv=False,
     )
     generic_nano_evaluator = SparseNanoEvaluator(
-        dataset_names=["python"],
+        dataset_names=["ds_foo"],
         dataset_id="example/FooBar",
         write_csv=False,
     )
