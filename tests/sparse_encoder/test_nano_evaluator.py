@@ -122,12 +122,6 @@ def test_sparse_nano_evaluator_auto_expand_splits_and_auto_names(
     evaluator = SparseNanoEvaluator(
         dataset_names=None,
         dataset_id="example/NanoFooBar",
-        mrr_at_k=[10],
-        ndcg_at_k=[10],
-        accuracy_at_k=[1],
-        precision_recall_at_k=[1],
-        map_at_k=[100],
-        score_functions={"dot": lambda a, b: a},
         write_csv=False,
     )
 
@@ -151,12 +145,6 @@ def test_sparse_nano_evaluator_single_split_path(
     evaluator = SparseNanoEvaluator(
         dataset_names=["python"],
         dataset_id="example/NanoFooBar",
-        mrr_at_k=[10],
-        ndcg_at_k=[10],
-        accuracy_at_k=[1],
-        precision_recall_at_k=[1],
-        map_at_k=[100],
-        score_functions={"dot": lambda a, b: a},
         write_csv=False,
     )
 
@@ -186,12 +174,6 @@ def test_sparse_nano_evaluator_mapping_validates_split_exists(monkeypatch: pytes
             dataset_id="sentence-transformers/NanoBEIR-en",
             dataset_name_to_human_readable={"msmarco": "MSMARCO"},
             split_prefix="Nano",
-            mrr_at_k=[10],
-            ndcg_at_k=[10],
-            accuracy_at_k=[1],
-            precision_recall_at_k=[1],
-            map_at_k=[100],
-            score_functions={"dot": lambda a, b: a},
             write_csv=False,
         )
 
@@ -205,12 +187,6 @@ def test_sparse_nano_evaluator_accepts_direct_split_names_with_mapping(
         dataset_id="example/NanoFooBar",
         dataset_name_to_human_readable={"msmarco": "MSMARCO"},
         split_prefix="Nano",
-        mrr_at_k=[10],
-        ndcg_at_k=[10],
-        accuracy_at_k=[1],
-        precision_recall_at_k=[1],
-        map_at_k=[100],
-        score_functions={"dot": lambda a, b: a},
         write_csv=False,
     )
 
@@ -227,12 +203,6 @@ def test_sparse_nano_evaluator_custom_name_metric_root(
         dataset_names=["python"],
         dataset_id="example/NanoFooBar",
         name="CustomSparseNano",
-        mrr_at_k=[10],
-        ndcg_at_k=[10],
-        accuracy_at_k=[1],
-        precision_recall_at_k=[1],
-        map_at_k=[100],
-        score_functions={"dot": lambda a, b: a},
         write_csv=False,
     )
 
@@ -248,23 +218,11 @@ def test_sequential_evaluator_with_sparse_nanobeir_and_nanocodesearchnet(
 ) -> None:
     nanobeir_evaluator = SparseNanoBEIREvaluator(
         dataset_names=["msmarco"],
-        mrr_at_k=[10],
-        ndcg_at_k=[10],
-        accuracy_at_k=[1],
-        precision_recall_at_k=[1],
-        map_at_k=[100],
-        score_functions={"dot": lambda a, b: a},
         write_csv=False,
     )
     nanocodesearchnet_evaluator = SparseNanoEvaluator(
         dataset_names=["python"],
         dataset_id="example/NanoFooBar",
-        mrr_at_k=[10],
-        ndcg_at_k=[10],
-        accuracy_at_k=[1],
-        precision_recall_at_k=[1],
-        map_at_k=[100],
-        score_functions={"dot": lambda a, b: a},
         write_csv=False,
     )
     seq_evaluator = SequentialEvaluator(

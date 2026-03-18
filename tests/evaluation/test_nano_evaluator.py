@@ -102,12 +102,6 @@ def test_nano_evaluator_auto_expand_splits_and_auto_names(patch_nano_eval: None,
     evaluator = NanoEvaluator(
         dataset_names=None,
         dataset_id="example/NanoFooBar",
-        mrr_at_k=[10],
-        ndcg_at_k=[10],
-        accuracy_at_k=[1],
-        precision_recall_at_k=[1],
-        map_at_k=[100],
-        score_functions={"cosine": lambda a, b: a},
         write_csv=False,
     )
 
@@ -132,12 +126,6 @@ def test_nano_evaluator_auto_expand_splits_with_mapping_in_strict_mode(
         dataset_name_to_human_readable={"msmarco": "MSMARCO"},
         split_prefix="Nano",
         strict_dataset_name_validation=True,
-        mrr_at_k=[10],
-        ndcg_at_k=[10],
-        accuracy_at_k=[1],
-        precision_recall_at_k=[1],
-        map_at_k=[100],
-        score_functions={"cosine": lambda a, b: a},
         write_csv=False,
     )
 
@@ -166,12 +154,6 @@ def test_nano_evaluator_mapping_validates_split_exists(monkeypatch: pytest.Monke
             dataset_id="sentence-transformers/NanoBEIR-en",
             dataset_name_to_human_readable={"msmarco": "MSMARCO"},
             split_prefix="Nano",
-            mrr_at_k=[10],
-            ndcg_at_k=[10],
-            accuracy_at_k=[1],
-            precision_recall_at_k=[1],
-            map_at_k=[100],
-            score_functions={"cosine": lambda a, b: a},
             write_csv=False,
         )
 
@@ -185,12 +167,6 @@ def test_nano_evaluator_accepts_direct_split_names_with_mapping(
         dataset_id="example/NanoFooBar",
         dataset_name_to_human_readable={"msmarco": "MSMARCO"},
         split_prefix="Nano",
-        mrr_at_k=[10],
-        ndcg_at_k=[10],
-        accuracy_at_k=[1],
-        precision_recall_at_k=[1],
-        map_at_k=[100],
-        score_functions={"cosine": lambda a, b: a},
         write_csv=False,
     )
 
@@ -209,12 +185,6 @@ def test_nano_evaluator_custom_name_and_case_insensitive_prompts(
         query_prompts={"PYTHON": "query: "},
         corpus_prompts={"PYTHON": "passage: "},
         name="CustomNano",
-        mrr_at_k=[10],
-        ndcg_at_k=[10],
-        accuracy_at_k=[1],
-        precision_recall_at_k=[1],
-        map_at_k=[100],
-        score_functions={"cosine": lambda a, b: a},
         write_csv=False,
     )
 
@@ -231,12 +201,6 @@ def test_nano_evaluator_config_keeps_custom_name(patch_nano_eval: None) -> None:
         dataset_names=["python"],
         dataset_id="example/NanoFooBar",
         name="CustomNano",
-        mrr_at_k=[10],
-        ndcg_at_k=[10],
-        accuracy_at_k=[1],
-        precision_recall_at_k=[1],
-        map_at_k=[100],
-        score_functions={"cosine": lambda a, b: a},
         write_csv=False,
     )
 
@@ -251,23 +215,11 @@ def test_sequential_evaluator_with_nanobeir_and_nanocodesearchnet(
 ) -> None:
     nanobeir_evaluator = NanoBEIREvaluator(
         dataset_names=["msmarco"],
-        mrr_at_k=[10],
-        ndcg_at_k=[10],
-        accuracy_at_k=[1],
-        precision_recall_at_k=[1],
-        map_at_k=[100],
-        score_functions={"cosine": lambda a, b: a},
         write_csv=False,
     )
     nanocodesearchnet_evaluator = NanoEvaluator(
         dataset_names=["python"],
         dataset_id="example/NanoFooBar",
-        mrr_at_k=[10],
-        ndcg_at_k=[10],
-        accuracy_at_k=[1],
-        precision_recall_at_k=[1],
-        map_at_k=[100],
-        score_functions={"cosine": lambda a, b: a},
         write_csv=False,
     )
     seq_evaluator = SequentialEvaluator(

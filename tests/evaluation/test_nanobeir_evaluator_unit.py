@@ -73,9 +73,6 @@ def dummy_model() -> Any:
 
 @pytest.fixture
 def patch_nanobeir_loader(monkeypatch: pytest.MonkeyPatch) -> None:
-    if hasattr(NanoBEIREvaluator, "_validate_mapping_splits"):
-        monkeypatch.setattr(NanoBEIREvaluator, "_validate_mapping_splits", lambda self: None)
-
     def fake_load_dataset(self: NanoBEIREvaluator, dataset_name: str, **ir_evaluator_kwargs: Any) -> Any:
         return FakeInformationRetrievalEvaluator(
             queries={"q1": "query 1"},
@@ -91,12 +88,6 @@ def patch_nanobeir_loader(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_nanobeir_primary_metric_key_default(patch_nanobeir_loader: None, dummy_model: Any) -> None:
     evaluator = NanoBEIREvaluator(
         dataset_names=["msmarco"],
-        mrr_at_k=[10],
-        ndcg_at_k=[10],
-        accuracy_at_k=[1],
-        precision_recall_at_k=[1],
-        map_at_k=[100],
-        score_functions={"cosine": lambda a, b: a},
         write_csv=False,
     )
 
@@ -109,12 +100,6 @@ def test_nanobeir_primary_metric_key_default(patch_nanobeir_loader: None, dummy_
 def test_nanobeir_primary_metric_key_with_truncate_dim(patch_nanobeir_loader: None, dummy_model: Any) -> None:
     evaluator = NanoBEIREvaluator(
         dataset_names=["msmarco"],
-        mrr_at_k=[10],
-        ndcg_at_k=[10],
-        accuracy_at_k=[1],
-        precision_recall_at_k=[1],
-        map_at_k=[100],
-        score_functions={"cosine": lambda a, b: a},
         truncate_dim=64,
         write_csv=False,
     )
@@ -133,12 +118,6 @@ def test_nanobeir_writes_csv_metrics(
 ) -> None:
     evaluator = NanoBEIREvaluator(
         dataset_names=["msmarco", "nq"],
-        mrr_at_k=[10],
-        ndcg_at_k=[10],
-        accuracy_at_k=[1],
-        precision_recall_at_k=[1],
-        map_at_k=[100],
-        score_functions={"cosine": lambda a, b: a},
         write_csv=True,
     )
 
