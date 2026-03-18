@@ -427,8 +427,7 @@ class CrossEncoderNanoBEIREvaluator(SentenceEvaluator):
     def _get_split_name(self, dataset_name: DatasetNameType | str) -> str:
         return f"Nano{DATASET_NAME_TO_HUMAN_READABLE[dataset_name.lower()]}"
 
-    def _parse_evaluation_key(self, evaluator_name: str, full_key: str) -> tuple[str, str]:
-        del evaluator_name
+    def _parse_evaluation_key(self, _evaluator_name: str, full_key: str) -> tuple[str, str]:
         _dataset, _rerank_k, metric = full_key.split("_", maxsplit=2)
         return full_key, metric
 

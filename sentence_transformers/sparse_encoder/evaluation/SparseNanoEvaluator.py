@@ -7,7 +7,6 @@ import numpy as np
 from torch import Tensor
 
 from sentence_transformers.evaluation._nano_utils import _GenericNanoDatasetMixin
-from sentence_transformers.evaluation.NanoEvaluator import NanoEvaluator
 from sentence_transformers.similarity_functions import SimilarityFunction
 from sentence_transformers.sparse_encoder.evaluation.SparseNanoBEIREvaluator import SparseNanoBEIREvaluator
 
@@ -82,13 +81,24 @@ class SparseNanoEvaluator(_GenericNanoDatasetMixin, SparseNanoBEIREvaluator):
         )
 
     def _get_human_readable_name(self, dataset_name: str) -> str:
-        human_readable_name = NanoEvaluator._get_human_readable_name(self, dataset_name)
+        split_name = self._get_split_name(dataset_name)
+        if self.dataset_name_to_human_readable is None:
+            human_readable_name = f"{self.evaluator_name}_{split_name}"
+        else:
+            human_readable_name = split_name
         if self.max_active_dims is not None:
             human_readable_name += f"_{self.max_active_dims}"
         return human_readable_name
 
-    description = NanoEvaluator.description
-    _get_metric_from_full_key = NanoEvaluator._get_metric_from_full_key
+    @property
+    def description(self) -> str:
+        return self.evaluator_name
+
+    def _get_metric_from_full_key(self, evaluator_name: str, full_key: str, num_underscores_in_name: int) -> str:
+        prefix = f"{evaluator_name}_"
+        if full_key.startswith(prefix):
+            return full_key.removeprefix(prefix)
+        return full_key.split("_", maxsplit=num_underscores_in_name)[-1]
 
     def get_config_dict(self) -> dict[str, Any]:
         config_dict = self._get_generic_config_dict()

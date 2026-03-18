@@ -522,8 +522,7 @@ class NanoBEIREvaluator(SentenceEvaluator):
     def _get_split_name(self, dataset_name: DatasetNameType | str) -> str:
         return f"Nano{DATASET_NAME_TO_HUMAN_READABLE[dataset_name.lower()]}"
 
-    def _get_metric_from_full_key(self, evaluator_name: str, full_key: str, num_underscores_in_name: int) -> str:
-        del evaluator_name
+    def _get_metric_from_full_key(self, _evaluator_name: str, full_key: str, num_underscores_in_name: int) -> str:
         splits = full_key.split("_", maxsplit=num_underscores_in_name)
         return splits[-1]
 
