@@ -15,9 +15,10 @@ class GlobalOrthogonalRegularizationLoss(nn.Module):
         self,
         model: SentenceTransformer,
         similarity_fct=cos_sim,
-        mean_weight: float | None = 1.0,
+        mean_weight: float | None = 0.0,
         second_moment_weight: float | None = 1.0,
-        aggregation: Literal["mean", "sum"] = "mean",
+        aggregation: Literal["mean", "sum"] = "sum",
+        second_moment_threshold: Literal["dimension"] | float | None = None,
     ) -> None:
         """
         Global Orthogonal Regularization (GOR) Loss that encourages embeddings to be well-distributed
@@ -42,10 +43,12 @@ class GlobalOrthogonalRegularizationLoss(nn.Module):
         Args:
             model: SentenceTransformer model
             similarity_fct: Function to compute similarity between embeddings (default: cosine similarity)
-            mean_weight: Weight for the mean term loss component. None or 0 can be used to disable this term (default: 1.0)
+            mean_weight: Weight for the mean term loss component. None or 0 can be used to disable this term (default: 0.0)
             second_moment_weight: Weight for the second moment term loss component. None or 0 can be used to disable this term (default: 1.0)
-            aggregation: How to combine losses across input columns. Either "mean" or "sum" (default: "mean").
+            aggregation: How to combine losses across input columns. Either "mean" or "sum" (default: "sum").
                 The EmbeddingGemma paper uses "sum".
+            second_moment_threshold: Threshold to subtract from the second moment with a ReLU. If None, the raw
+                second moment is used, matching EmbeddingGemma. If "dimension", uses the original GOR threshold 1/d.
 
         References:
             - For further details, see: https://huggingface.co/papers/1708.06320 or https://huggingface.co/papers/2509.20354.
@@ -61,12 +64,12 @@ class GlobalOrthogonalRegularizationLoss(nn.Module):
         Example:
             ::
 
-                import torch
                 from datasets import Dataset
-                from torch import Tensor
                 from sentence_transformers import SentenceTransformer, SentenceTransformerTrainer
-                from sentence_transformers.sentence_transformer.losses import GlobalOrthogonalRegularizationLoss, MultipleNegativesRankingLoss
-                from sentence_transformers.util import cos_sim
+                from sentence_transformers.sentence_transformer.losses import (
+                    GlobalOrthogonalRegularizationWrapperLoss,
+                    MultipleNegativesRankingLoss,
+                )
 
                 model = SentenceTransformer("microsoft/mpnet-base")
                 train_dataset = Dataset.from_dict({
@@ -74,22 +77,8 @@ class GlobalOrthogonalRegularizationLoss(nn.Module):
                     "positive": ["It's so sunny.", "He took the car to the office."],
                 })
 
-                class InfoNCEGORLoss(torch.nn.Module):
-                    def __init__(self, model: SentenceTransformer, similarity_fct=cos_sim, scale=20.0) -> None:
-                        super().__init__()
-                        self.model = model
-                        self.info_nce_loss = MultipleNegativesRankingLoss(model, similarity_fct=similarity_fct, scale=scale)
-                        self.gor_loss = GlobalOrthogonalRegularizationLoss(model, similarity_fct=similarity_fct)
-
-                    def forward(self, sentence_features: list[dict[str, Tensor]], labels: Tensor | None = None) -> Tensor:
-                        embeddings = [self.model(sentence_feature)["sentence_embedding"] for sentence_feature in sentence_features]
-                        info_nce_loss: dict[str, Tensor] = {
-                            "info_nce": self.info_nce_loss.compute_loss_from_embeddings(embeddings, labels)
-                        }
-                        gor_loss: dict[str, Tensor] = self.gor_loss.compute_loss_from_embeddings(embeddings, labels)
-                        return {**info_nce_loss, **gor_loss}
-
-                loss = InfoNCEGORLoss(model)
+                base_loss = MultipleNegativesRankingLoss(model)
+                loss = GlobalOrthogonalRegularizationWrapperLoss(model, base_loss)
                 trainer = SentenceTransformerTrainer(
                     model=model,
                     train_dataset=train_dataset,
@@ -129,6 +118,7 @@ class GlobalOrthogonalRegularizationLoss(nn.Module):
         if aggregation not in ["mean", "sum"]:
             raise ValueError(f"aggregation must be 'mean' or 'sum', got '{aggregation}'")
         self.aggregation = aggregation
+        self.second_moment_threshold = second_moment_threshold
 
     def forward(
         self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor | None = None
@@ -178,21 +168,27 @@ class GlobalOrthogonalRegularizationLoss(nn.Module):
             Tuple of (mean_term, second_moment_term) losses (unweighted)
         """
         batch_size = embeddings.size(0)
+        if batch_size < 2:
+            raise ValueError("GlobalOrthogonalRegularizationLoss requires at least 2 embeddings per input column.")
         hidden_dim = embeddings.size(1)
 
         # Compute pairwise similarity matrix between all embeddings, and exclude self-similarities
         sim_matrix = self.similarity_fct(embeddings, embeddings)
-        sim_matrix.fill_diagonal_(0.0)
+        sim_matrix = sim_matrix.masked_fill(torch.eye(batch_size, device=sim_matrix.device, dtype=torch.bool), 0.0)
         num_off_diagonal = batch_size * (batch_size - 1)
 
         # Mean term: M_1^2 where M_1 = mean of off-diagonal similarities
         # Penalizes high similarities across inputs from the same column (e.g., queries vs other queries)
         mean_term = (sim_matrix.sum() / num_off_diagonal).pow(2)
 
-        # Second moment term: M_2 - 1/d where M_2 = mean of squared off-diagonal similarities and d is embedding dimension
-        # Pushes the second moment close to 1/d, encouraging a more uniform distribution
+        # Second moment term: raw M_2 by default, matching EmbeddingGemma. The original GOR thresholded variant
+        # can be selected with second_moment_threshold="dimension" or a float threshold.
         second_moment = sim_matrix.pow(2).sum() / num_off_diagonal
-        second_moment_term = torch.relu(second_moment - (1.0 / hidden_dim))
+        if self.second_moment_threshold is None:
+            second_moment_term = second_moment
+        else:
+            threshold = 1.0 / hidden_dim if self.second_moment_threshold == "dimension" else self.second_moment_threshold
+            second_moment_term = torch.relu(second_moment - threshold)
 
         return mean_term, second_moment_term
 
@@ -202,6 +198,7 @@ class GlobalOrthogonalRegularizationLoss(nn.Module):
             "mean_weight": self.mean_weight,
             "second_moment_weight": self.second_moment_weight,
             "aggregation": self.aggregation,
+            "second_moment_threshold": self.second_moment_threshold,
         }
 
     @property

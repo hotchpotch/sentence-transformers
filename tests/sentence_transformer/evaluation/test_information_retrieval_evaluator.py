@@ -139,3 +139,52 @@ def test_metrics(test_data, mock_model, tmp_path: Path):
 
     for key, expected_value in expected_results.items():
         assert results[key] == pytest.approx(expected_value, abs=1e-9)
+
+
+def test_binary_precision_converts_embeddings_to_float_before_scoring(test_data):
+    queries, corpus, relevant_docs = test_data
+    seen_dtypes = []
+    seen_shapes = []
+
+    class _MockModelCardData:
+        def __getattr__(self, name):
+            return lambda *args, **kwargs: None
+
+    class _BinaryMockModel:
+        similarity_fn_name = "binary_score"
+        model_card_data = _MockModelCardData()
+
+        def similarity(self, a, b):
+            seen_dtypes.extend([a.dtype, b.dtype])
+            seen_shapes.extend([a.shape[-1], b.shape[-1]])
+            return a @ b.T
+
+        def encode_query(self, sentences, **kwargs):
+            return self._encode(sentences, **kwargs)
+
+        def encode_document(self, sentences, **kwargs):
+            return self._encode(sentences, **kwargs)
+
+        def _encode(self, sentences, **kwargs):
+            assert kwargs["precision"] == "binary"
+            assert kwargs["normalize_embeddings"] is True
+            return torch.full((len(sentences), 1), -128, dtype=torch.int8)
+
+    evaluator = InformationRetrievalEvaluator(
+        queries=queries,
+        corpus=corpus,
+        relevant_docs=relevant_docs,
+        name="test",
+        accuracy_at_k=[1],
+        precision_recall_at_k=[1],
+        mrr_at_k=[1],
+        ndcg_at_k=[1],
+        map_at_k=[1],
+        precision="binary",
+    )
+
+    evaluator(_BinaryMockModel())
+
+    assert seen_dtypes
+    assert all(dtype == torch.float32 for dtype in seen_dtypes)
+    assert set(seen_shapes) == {8}

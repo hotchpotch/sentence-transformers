@@ -174,6 +174,9 @@ class EmbeddingSimilarityEvaluator(BaseEvaluator):
         if self.precision in ("ubinary", "binary"):
             embeddings1 = np.unpackbits(embeddings1, axis=1)
             embeddings2 = np.unpackbits(embeddings2, axis=1)
+        if self.precision and self.precision != "float32":
+            embeddings1 = embeddings1.astype(np.float32)
+            embeddings2 = embeddings2.astype(np.float32)
 
         labels = self.scores
 
@@ -254,7 +257,7 @@ class EmbeddingSimilarityEvaluator(BaseEvaluator):
             show_progress_bar=self.show_progress_bar,
             convert_to_numpy=True,
             precision=self.precision,
-            normalize_embeddings=bool(self.precision),
+            normalize_embeddings=self.precision is not None and self.precision != "float32",
             truncate_dim=self.truncate_dim,
             **kwargs,
         )

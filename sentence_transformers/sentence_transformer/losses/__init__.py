@@ -23,6 +23,10 @@ from .denoising_auto_encoder import DenoisingAutoEncoderLoss
 from .distill_kl_div import DistillKLDivLoss
 from .gist_embed import GISTEmbedLoss
 from .global_orthogonal_regularization import GlobalOrthogonalRegularizationLoss
+from .global_orthogonal_regularization_wrapper import (
+    GlobalOrthogonalRegularizationWrapperLoss,
+    InfoNCEWithGlobalOrthogonalRegularizationLoss,
+)
 from .margin_mse import MarginMSELoss
 from .matryoshka import MatryoshkaLoss
 from .matryoshka_2d import Matryoshka2dLoss
@@ -31,6 +35,7 @@ from .mse import MSELoss
 from .multiple_negatives_ranking import MultipleNegativesRankingLoss
 from .multiple_negatives_symmetric_ranking import MultipleNegativesSymmetricRankingLoss
 from .online_contrastive import OnlineContrastiveLoss
+from .quantization_aware import QuantizationAwareLoss
 from .softmax import SoftmaxLoss
 from .triplet import TripletDistanceMetric, TripletLoss
 
@@ -57,10 +62,13 @@ __all__ = [
     "CoSENTLoss",
     "AnglELoss",
     "OnlineContrastiveLoss",
+    "QuantizationAwareLoss",
     "MegaBatchMarginLoss",
     "DenoisingAutoEncoderLoss",
     "GISTEmbedLoss",
     "GlobalOrthogonalRegularizationLoss",
+    "GlobalOrthogonalRegularizationWrapperLoss",
+    "InfoNCEWithGlobalOrthogonalRegularizationLoss",
     "BatchHardTripletLoss",
     "BatchHardTripletLossDistanceFunction",
     "BatchHardSoftMarginTripletLoss",

@@ -5,7 +5,7 @@ import json
 import logging
 import os
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 import torch
@@ -151,6 +151,7 @@ class InformationRetrievalEvaluator(BaseEvaluator):
         corpus_prompt: str | None = None,
         corpus_prompt_name: str | None = None,
         write_predictions: bool = False,
+        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] | None = None,
     ) -> None:
         super().__init__()
         self.queries_ids = []
@@ -184,9 +185,12 @@ class InformationRetrievalEvaluator(BaseEvaluator):
         self.score_function_names = sorted(list(self.score_functions.keys())) if score_functions else []
         self.main_score_function = SimilarityFunction(main_score_function) if main_score_function else None
         self.truncate_dim = truncate_dim
+        self.precision = precision
 
         if name:
             name = "_" + name
+        if precision:
+            name += f"_{precision}"
 
         self.csv_file: str = "Information-Retrieval_evaluation" + name + "_results.csv"
         self.csv_headers = ["epoch", "steps"]
@@ -322,6 +326,7 @@ class InformationRetrievalEvaluator(BaseEvaluator):
             prompt_name=self.query_prompt_name,
             prompt=self.query_prompt,
         )
+        query_embeddings = self._convert_to_float(query_embeddings)
 
         queries_result_list = {}
         for name in self.score_functions:
@@ -344,6 +349,7 @@ class InformationRetrievalEvaluator(BaseEvaluator):
                 )
             else:
                 sub_corpus_embeddings = corpus_embeddings[corpus_start_idx:corpus_end_idx]
+            sub_corpus_embeddings = self._convert_to_float(sub_corpus_embeddings)
 
             # Compute cosine similarities
             for name, score_function in self.score_functions.items():
@@ -440,9 +446,33 @@ class InformationRetrievalEvaluator(BaseEvaluator):
             batch_size=self.batch_size,
             show_progress_bar=self.show_progress_bar,
             convert_to_tensor=True,
+            precision=self.precision,
+            normalize_embeddings=self.precision is not None and self.precision != "float32",
             truncate_dim=self.truncate_dim,
             **kwargs,
         )
+
+    def _convert_to_float(self, embeddings: Tensor | np.ndarray) -> Tensor:
+        if self.precision is None or self.precision == "float32":
+            if isinstance(embeddings, np.ndarray):
+                return torch.from_numpy(embeddings).float()
+            return embeddings
+
+        if isinstance(embeddings, Tensor):
+            device = embeddings.device
+            if self.precision in ("binary", "ubinary"):
+                embeddings_np = embeddings.detach().cpu().numpy()
+                if self.precision == "binary":
+                    embeddings_np = (embeddings_np + 128).astype(np.uint8)
+                embeddings_np = np.unpackbits(embeddings_np, axis=1).astype(np.float32)
+                return torch.from_numpy(embeddings_np).to(device)
+            return embeddings.float()
+
+        if self.precision == "binary":
+            embeddings = (embeddings + 128).astype(np.uint8)
+        if self.precision in ("binary", "ubinary"):
+            embeddings = np.unpackbits(embeddings, axis=1)
+        return torch.from_numpy(embeddings.astype(np.float32))
 
     def compute_metrics(self, queries_result_list: list[object]):
         # Init score computation values
@@ -571,6 +601,7 @@ class InformationRetrievalEvaluator(BaseEvaluator):
             "query_prompt_name",
             "corpus_prompt",
             "corpus_prompt_name",
+            "precision",
         ]
         for key in config_dict_candidate_keys:
             if getattr(self, key) is not None:

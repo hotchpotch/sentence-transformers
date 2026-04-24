@@ -231,6 +231,7 @@ class NanoBEIREvaluator(BaseEvaluator):
         query_prompts: str | dict[str, str] | None = None,
         corpus_prompts: str | dict[str, str] | None = None,
         write_predictions: bool = False,
+        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] | None = None,
     ):
         super().__init__()
         if dataset_names is None:
@@ -248,9 +249,12 @@ class NanoBEIREvaluator(BaseEvaluator):
         self.score_function_names = sorted(list(self.score_functions.keys())) if score_functions else []
         self.main_score_function = main_score_function
         self.truncate_dim = truncate_dim
+        self.precision = precision
         self.name = f"NanoBEIR_{aggregate_key}"
         if self.truncate_dim:
             self.name += f"_{self.truncate_dim}"
+        if self.precision:
+            self.name += f"_{self.precision}"
 
         self.mrr_at_k = mrr_at_k
         self.ndcg_at_k = ndcg_at_k
@@ -274,6 +278,7 @@ class NanoBEIREvaluator(BaseEvaluator):
             "score_functions": score_functions,
             "main_score_function": main_score_function,
             "write_predictions": write_predictions,
+            "precision": precision,
         }
         self.evaluators = [
             self._load_dataset(name, **ir_evaluator_kwargs)
@@ -424,6 +429,8 @@ class NanoBEIREvaluator(BaseEvaluator):
 
         if self.truncate_dim is not None:
             human_readable_name += f"_{self.truncate_dim}"
+        if self.precision:
+            human_readable_name += f"_{self.precision}"
         return human_readable_name
 
     def _load_dataset(
@@ -529,7 +536,7 @@ class NanoBEIREvaluator(BaseEvaluator):
 
     def get_config_dict(self) -> dict[str, Any]:
         config_dict = {"dataset_names": self.dataset_names, "dataset_id": self.dataset_id}
-        config_dict_candidate_keys = ["truncate_dim", "query_prompts", "corpus_prompts"]
+        config_dict_candidate_keys = ["truncate_dim", "query_prompts", "corpus_prompts", "precision"]
         for key in config_dict_candidate_keys:
             if getattr(self, key) is not None:
                 config_dict[key] = getattr(self, key)
