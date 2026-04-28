@@ -66,6 +66,118 @@ def test_gor_original_dimension_threshold_remains_available() -> None:
     assert output["gor_second_moment"] == pytest.approx(0.0)
 
 
+def test_gemma_gor_can_select_embedding_columns() -> None:
+    loss = GlobalOrthogonalRegularizationLoss(model=None, embedding_indices=(0, 1))
+    orthogonal = torch.eye(3)
+    collapsed = torch.tensor(
+        [
+            [1.0, 0.0],
+            [1.0, 0.0],
+            [1.0, 0.0],
+        ]
+    )
+
+    output = loss.compute_loss_from_embeddings([orthogonal, orthogonal, collapsed])
+
+    assert output["gor_second_moment"] == pytest.approx(0.0)
+
+
+def test_gemma_gor_rejects_out_of_range_embedding_indices() -> None:
+    loss = GlobalOrthogonalRegularizationLoss(model=None, embedding_indices=(0, 2))
+
+    with pytest.raises(ValueError, match="embedding_indices"):
+        loss.compute_loss_from_embeddings([torch.eye(2), torch.eye(2)])
+
+
+def test_original_gor_mode_matches_paired_non_matching_formula() -> None:
+    loss = GlobalOrthogonalRegularizationLoss(model=None, mode="original")
+    anchors = torch.tensor(
+        [
+            [1.0, 0.0],
+            [1.0, 0.0],
+        ]
+    )
+    negatives = torch.tensor(
+        [
+            [1.0, 0.0],
+            [0.0, 1.0],
+        ]
+    )
+
+    output = loss.compute_loss_from_embeddings([anchors, negatives])
+
+    assert set(output) == {"gor_mean", "gor_second_moment"}
+    assert output["gor_mean"] == pytest.approx(0.25)
+    assert output["gor_second_moment"] == pytest.approx(0.0)
+
+
+def test_original_gor_mode_requires_anchor_negative_columns() -> None:
+    loss = GlobalOrthogonalRegularizationLoss(model=None, mode="original")
+
+    with pytest.raises(ValueError, match="requires at least two embedding columns"):
+        loss.compute_loss_from_embeddings([torch.eye(2)])
+
+
+def test_original_gor_mode_can_select_anchor_negative_columns() -> None:
+    loss = GlobalOrthogonalRegularizationLoss(model=None, mode="original", embedding_indices=(0, 2))
+    anchors = torch.tensor(
+        [
+            [1.0, 0.0],
+            [1.0, 0.0],
+        ]
+    )
+    positives = torch.tensor(
+        [
+            [1.0, 0.0],
+            [1.0, 0.0],
+        ]
+    )
+    negatives = torch.tensor(
+        [
+            [1.0, 0.0],
+            [0.0, 1.0],
+        ]
+    )
+
+    output = loss.compute_loss_from_embeddings([anchors, positives, negatives])
+
+    assert output["gor_mean"] == pytest.approx(0.25)
+    assert output["gor_second_moment"] == pytest.approx(0.0)
+
+
+def test_original_gor_mode_can_select_multiple_column_pairs() -> None:
+    loss = GlobalOrthogonalRegularizationLoss(
+        model=None,
+        mode="original",
+        mean_weight=0.0,
+        second_moment_threshold=None,
+        embedding_indices=(0, 1, 2),
+    )
+    first = torch.tensor(
+        [
+            [1.0, 0.0],
+            [1.0, 0.0],
+        ]
+    )
+    second = torch.tensor(
+        [
+            [1.0, 0.0],
+            [0.0, 1.0],
+        ]
+    )
+    third = torch.tensor(
+        [
+            [0.0, 1.0],
+            [0.0, 1.0],
+        ]
+    )
+
+    output = loss.compute_loss_from_embeddings([first, second, third])
+
+    assert set(output) == {"gor_second_moment"}
+    assert output["gor_second_moment"] == pytest.approx(1.0)
+
+
 def test_gor_requires_at_least_two_embeddings_per_column() -> None:
     loss = GlobalOrthogonalRegularizationLoss(model=None)
 

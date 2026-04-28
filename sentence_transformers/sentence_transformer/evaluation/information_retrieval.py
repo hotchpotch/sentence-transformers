@@ -463,13 +463,13 @@ class InformationRetrievalEvaluator(BaseEvaluator):
             if self.precision in ("binary", "ubinary"):
                 embeddings_np = embeddings.detach().cpu().numpy()
                 if self.precision == "binary":
-                    embeddings_np = (embeddings_np + 128).astype(np.uint8)
+                    embeddings_np = (embeddings_np.astype(np.int16) + 128).astype(np.uint8)
                 embeddings_np = np.unpackbits(embeddings_np, axis=1).astype(np.float32)
                 return torch.from_numpy(embeddings_np).to(device)
             return embeddings.float()
 
         if self.precision == "binary":
-            embeddings = (embeddings + 128).astype(np.uint8)
+            embeddings = (embeddings.astype(np.int16) + 128).astype(np.uint8)
         if self.precision in ("binary", "ubinary"):
             embeddings = np.unpackbits(embeddings, axis=1)
         return torch.from_numpy(embeddings.astype(np.float32))
