@@ -116,6 +116,7 @@ _TRANSFORMERS_APPLY_CHAT_TEMPLATE_RECOMMENDS_PROCESSOR_KWARGS = parse_version(tr
 )
 _TRANSFORMERS_SUPPORTS_USE_BIDIRECTIONAL_ATTENTION = parse_version(transformers_version) >= parse_version("4.56.2")
 _TRANSFORMERS_SUPPORTS_IS_CAUSAL_FALSE = parse_version(transformers_version) >= parse_version("5.2.0")
+DEFAULT_CHAT_TEMPLATE_PRESERVE_FINAL_TOKENS = 16
 
 TransformerTask = Literal[
     "feature-extraction", "sequence-classification", "text-generation", "any-to-any", "fill-mask"
@@ -1360,7 +1361,9 @@ class Transformer(InputModule):
         top_level_kwargs |= {
             key: modality_kwargs["text"].pop(key) for key in top_level_kwarg_names & modality_kwargs["text"].keys()
         }
-        preserve_final_tokens = chat_template_kwargs.pop("preserve_final_tokens", 16)
+        preserve_final_tokens = chat_template_kwargs.pop(
+            "preserve_final_tokens", DEFAULT_CHAT_TEMPLATE_PRESERVE_FINAL_TOKENS
+        )
         truncation = top_level_kwargs.get("truncation", False)
         max_length = top_level_kwargs.get("max_length")
         if max_length is None and truncation and self.tokenizer is not None:
