@@ -705,6 +705,52 @@ class TestProcessChatMessages:
         )
         assert captured_kwargs["add_generation_prompt"] is True
 
+    def test_text_generation_chat_truncation_preserves_tail(self, bert_tiny_transformer, monkeypatch):
+        model = bert_tiny_transformer
+        model.transformer_task = "text-generation"
+        model.modality_config["message"] = {"method": "forward", "method_output_name": "logits"}
+
+        full_ids = list(range(20))
+
+        def mock_apply_chat_template(messages, **kwargs):
+            ids = full_ids
+            if kwargs.get("truncation"):
+                ids = ids[: kwargs["max_length"]]
+            if kwargs.get("return_tensors") == "pt":
+                return {
+                    "input_ids": torch.tensor([ids]),
+                    "attention_mask": torch.ones(1, len(ids), dtype=torch.long),
+                }
+            return {"input_ids": [ids]}
+
+        monkeypatch.setattr(model.processor, "apply_chat_template", mock_apply_chat_template)
+        output = model._process_chat_messages(
+            messages=[[{"role": "user", "content": "test"}]],
+            modality_kwargs={
+                "text": {"padding": True, "truncation": True, "max_length": 8},
+                "audio": {},
+                "image": {},
+                "video": {},
+            },
+            common_kwargs={"return_tensors": "pt"},
+        )
+
+        assert output["input_ids"].tolist() == [full_ids[-8:]]
+
+        output = model._process_chat_messages(
+            messages=[[{"role": "user", "content": "test"}]],
+            modality_kwargs={
+                "text": {"padding": True, "truncation": True, "max_length": 8},
+                "audio": {},
+                "image": {},
+                "video": {},
+            },
+            common_kwargs={"return_tensors": "pt"},
+            chat_template_kwargs={"preserve_final_tokens": 4},
+        )
+
+        assert output["input_ids"].tolist() == [full_ids[:4] + full_ids[-4:]]
+
 
 class TestModelLoading:
     def test_invalid_backend_error(self):

@@ -1320,7 +1320,7 @@ class Transformer(InputModule):
 
         # Ideally we'd use the same code path for both ProcessorMixin and Tokenizers, but the latter expects
         # the text kwargs to be passed at the top level instead of in a nested "text_kwargs" dict.
-        chat_template_kwargs = chat_template_kwargs or {}
+        chat_template_kwargs = dict(chat_template_kwargs or {})
         if isinstance(self.processor, ProcessorMixin):
             # Transformers v5.4.0 prefers us to pass processor_kwargs as a single dict, but there's still some top level
             # kwargs that need to be hoisted out for backwards compatibility.
@@ -1360,6 +1360,28 @@ class Transformer(InputModule):
         top_level_kwargs |= {
             key: modality_kwargs["text"].pop(key) for key in top_level_kwarg_names & modality_kwargs["text"].keys()
         }
+        preserve_final_tokens = chat_template_kwargs.pop("preserve_final_tokens", 16)
+        truncation = top_level_kwargs.get("truncation", False)
+        max_length = top_level_kwargs.get("max_length")
+        if max_length is None and truncation and self.tokenizer is not None:
+            max_length = self.tokenizer.model_max_length
+
+        if (
+            preserve_final_tokens
+            and self.transformer_task in ("text-generation", "any-to-any")
+            and self.input_formatter.is_text_only_messages(messages)
+            and truncation
+            and max_length is not None
+        ):
+            return self._apply_chat_template_preserving_tail(
+                messages=messages,
+                modality_kwargs=modality_kwargs,
+                common_kwargs=common_kwargs,
+                chat_template_kwargs=chat_template_kwargs,
+                top_level_kwargs=top_level_kwargs,
+                max_length=max_length,
+                preserve_final_tokens=preserve_final_tokens,
+            )
 
         return self.processor.apply_chat_template(
             messages,
@@ -1369,6 +1391,48 @@ class Transformer(InputModule):
             common_kwargs=common_kwargs,
             **top_level_kwargs,
             **chat_template_kwargs,
+        )
+
+    def _apply_chat_template_preserving_tail(
+        self,
+        messages: list[list[MessageInput]],
+        modality_kwargs: dict[str, dict[str, Any]],
+        common_kwargs: dict[str, Any],
+        chat_template_kwargs: dict[str, Any],
+        top_level_kwargs: dict[str, Any],
+        max_length: int,
+        preserve_final_tokens: int,
+    ) -> dict[str, Any]:
+        tokenizer_kwargs = {**modality_kwargs["text"], "verbose": False}
+        full = self.processor.apply_chat_template(
+            messages,
+            tokenize=True,
+            return_dict=True,
+            tokenizer_kwargs=tokenizer_kwargs,
+            common_kwargs=common_kwargs,
+            padding=False,
+            truncation=False,
+            return_tensors=None,
+            **chat_template_kwargs,
+        )
+        input_ids = full["input_ids"]
+        if isinstance(input_ids, torch.Tensor):
+            input_ids = input_ids.tolist()
+        if input_ids and isinstance(input_ids[0], int):
+            input_ids = [input_ids]
+
+        preserve_final_tokens = min(preserve_final_tokens, max_length)
+        head_length = max_length - preserve_final_tokens
+        input_ids = [
+            ids[:head_length] + ids[-preserve_final_tokens:] if len(ids) > max_length else ids
+            for ids in input_ids
+        ]
+        return self.processor.pad(
+            {"input_ids": input_ids},
+            padding=top_level_kwargs.get("padding", False),
+            max_length=max_length if top_level_kwargs.get("padding") == "max_length" else None,
+            return_tensors=top_level_kwargs.get("return_tensors"),
+            verbose=False,
         )
 
     def _get_prompt_length(self, prompt: str, **kwargs) -> int | None:
